@@ -1,0 +1,44 @@
+{
+    "name": "Bitcoin Price Tracker",
+    "short_name": "BTC Tracker",
+    "description": "Real-time Bitcoin price tracking with desktop widget support",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#1f2937",
+    "theme_color": "#f59e0b",
+    "orientation": "any",
+    "icons": [
+      {
+        "src": "/icon-192.png",
+        "sizes": "192x192",
+        "type": "image/png",
+        "purpose": "any maskable"
+      },
+      {
+        "src": "/icon-512.png",
+        "sizes": "512x512",
+        "type": "image/png",
+        "purpose": "any maskable"
+      }
+    ],
+    "shortcuts": [
+      {
+        "name": "Compact View",
+        "short_name": "Widget",
+        "description": "Open in compact widget mode",
+        "url": "/?mode=compact",
+        "icons": [{ "src": "/icon-96.png", "sizes": "96x96" }]
+      }
+    ],
+    "categories": ["finance", "productivity"],
+    "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+    "edge_side_panel": {
+      "preferred_width": 320
+    },
+    "protocol_handlers": [
+      {
+        "protocol": "web+btcprice",
+        "url": "/?price=%s"
+      }
+    ]
+  }
