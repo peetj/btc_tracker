@@ -25,4 +25,4 @@ dist-ssr
 
 .vercel
 
-btcusd_1-min_data.csv
+data/btcusd_1-min_data.csv
