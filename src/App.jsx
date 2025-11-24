@@ -473,6 +473,24 @@ const DataLog = ({ data, durationId }) => {
 };
 
 const PriceCard = ({ currentData, previousData, loading, onRefresh, onFetchMissing, fetchStatus }) => {
+  if (loading && !currentData) {
+    return (
+      <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-xl transition-all duration-300 border border-slate-100 dark:border-slate-700">
+        <div className="flex flex-col items-center justify-center py-8 space-y-4">
+          <div className="relative">
+            <div className="w-20 h-20 border-4 border-slate-200 dark:border-slate-700 rounded-full"></div>
+            <div className="w-20 h-20 border-4 border-orange-500 border-t-transparent rounded-full animate-spin absolute top-0"></div>
+          </div>
+          <div className="text-center">
+            <p className="text-slate-700 dark:text-slate-300 font-medium text-lg">Loading Bitcoin Data</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">Fetching historical prices from CSV...</p>
+            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">This may take a few seconds</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
   if (!currentData) return null;
 
   const price = currentData.close;
@@ -551,7 +569,7 @@ const PriceCard = ({ currentData, previousData, loading, onRefresh, onFetchMissi
   );
 };
 
-const ChartSection = ({ data, range, setRange }) => {
+const ChartSection = ({ data, range, setRange, loading }) => {
   const { isDarkMode } = useTheme();
   
   const chartData = useMemo(() => {
@@ -583,10 +601,12 @@ const ChartSection = ({ data, range, setRange }) => {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
         <div>
           <h3 className="text-lg font-semibold text-slate-800 dark:text-white">Price History</h3>
-          <span className={`text-sm font-medium ${periodChange >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-            {periodChange >= 0 ? '+' : ''}{periodChange.toFixed(2)}% 
-            <span className="text-slate-400 dark:text-slate-500 ml-1">past {TIME_RANGES[range].label}</span>
-          </span>
+          {!loading && (
+            <span className={`text-sm font-medium ${periodChange >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+              {periodChange >= 0 ? '+' : ''}{periodChange.toFixed(2)}% 
+              <span className="text-slate-400 dark:text-slate-500 ml-1">past {TIME_RANGES[range].label}</span>
+            </span>
+          )}
         </div>
         
         <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-lg">
@@ -594,11 +614,12 @@ const ChartSection = ({ data, range, setRange }) => {
             <button
               key={key}
               onClick={() => setRange(key)}
+              disabled={loading}
               className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
                 range === key 
                   ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm' 
                   : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
-              }`}
+              } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               {key}
             </button>
@@ -606,49 +627,64 @@ const ChartSection = ({ data, range, setRange }) => {
         </div>
       </div>
 
-      <div className="h-[300px] w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={chartData}>
-            <defs>
-              <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#f97316" stopOpacity={0.2}/>
-                <stop offset="95%" stopColor="#f97316" stopOpacity={0}/>
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#334155' : '#e2e8f0'} vertical={false} />
-            <XAxis 
-              dataKey="dateStr" 
-              stroke={isDarkMode ? '#94a3b8' : '#64748b'} 
-              tick={{ fontSize: 11 }}
-              tickMargin={10}
-              minTickGap={30}
-            />
-            <YAxis 
-              stroke={isDarkMode ? '#94a3b8' : '#64748b'}
-              tick={{ fontSize: 11 }}
-              domain={['auto', 'auto']}
-              tickFormatter={(val) => val >= 1000 ? `$${(val/1000).toFixed(0)}k` : `$${val}`}
-            />
-            <Tooltip 
-              contentStyle={{ 
-                backgroundColor: isDarkMode ? '#1e293b' : '#fff',
-                borderColor: isDarkMode ? '#334155' : '#e2e8f0',
-                borderRadius: '12px',
-                boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
-              }}
-              formatter={(val) => [formatCurrency(val), 'Price']}
-              labelStyle={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}
-            />
-            <Area 
-              type="monotone" 
-              dataKey="close" 
-              stroke="#f97316" 
-              strokeWidth={2} 
-              fillOpacity={1} 
-              fill="url(#colorPrice)" 
-            />
-          </AreaChart>
-        </ResponsiveContainer>
+      <div className="h-[300px] w-full relative">
+        {loading ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-50/50 dark:bg-slate-900/50 rounded-lg">
+            <div className="flex flex-col items-center space-y-4">
+              <div className="relative">
+                <div className="w-16 h-16 border-4 border-slate-200 dark:border-slate-700 rounded-full"></div>
+                <div className="w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin absolute top-0"></div>
+              </div>
+              <div className="text-center">
+                <p className="text-slate-700 dark:text-slate-300 font-medium">Loading Historical Data</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Processing 7.2M records...</p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={chartData}>
+              <defs>
+                <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#f97316" stopOpacity={0.2}/>
+                  <stop offset="95%" stopColor="#f97316" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#334155' : '#e2e8f0'} vertical={false} />
+              <XAxis 
+                dataKey="dateStr" 
+                stroke={isDarkMode ? '#94a3b8' : '#64748b'} 
+                tick={{ fontSize: 11 }}
+                tickMargin={10}
+                minTickGap={30}
+              />
+              <YAxis 
+                stroke={isDarkMode ? '#94a3b8' : '#64748b'}
+                tick={{ fontSize: 11 }}
+                domain={['auto', 'auto']}
+                tickFormatter={(val) => val >= 1000 ? `$${(val/1000).toFixed(0)}k` : `$${val}`}
+              />
+              <Tooltip 
+                contentStyle={{ 
+                  backgroundColor: isDarkMode ? '#1e293b' : '#fff',
+                  borderColor: isDarkMode ? '#334155' : '#e2e8f0',
+                  borderRadius: '12px',
+                  boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
+                }}
+                formatter={(val) => [formatCurrency(val), 'Price']}
+                labelStyle={{ color: isDarkMode ? '#94a3b8' : '#64748b' }}
+              />
+              <Area 
+                type="monotone" 
+                dataKey="close" 
+                stroke="#f97316" 
+                strokeWidth={2} 
+                fillOpacity={1} 
+                fill="url(#colorPrice)" 
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        )}
       </div>
     </div>
   );
@@ -735,7 +771,8 @@ const BitcoinTracker = () => {
         <ChartSection 
           data={allData} 
           range={range} 
-          setRange={setRange} 
+          setRange={setRange}
+          loading={loading}
         />
 
         {/* Data Inspector Section */}
