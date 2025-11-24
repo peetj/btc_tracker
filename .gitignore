@@ -24,3 +24,5 @@ dist-ssr
 *.sw?
 
 .vercel
+
+btcusd_1-min_data.csv
