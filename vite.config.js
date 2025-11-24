@@ -1,11 +1,20 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import { viteStaticCopy } from 'vite-plugin-static-copy'
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
     react(),
+    viteStaticCopy({
+      targets: [
+        {
+          src: 'data/btcusd_1-min_data.csv',
+          dest: 'data'
+        }
+      ]
+    }),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: [
@@ -14,7 +23,7 @@ export default defineConfig({
       manifest: {
         name: 'Bitcoin Price Tracker',
         short_name: 'BTC Tracker',
-        description: 'Real-time Bitcoin price tracking',
+        description: 'Historical Bitcoin price tracking from 2012',
         theme_color: '#f59e0b',
         background_color: '#1f2937',
         display: 'standalone',
@@ -32,19 +41,19 @@ export default defineConfig({
         ]
       },
       workbox: {
+        // Exclude large CSV files from service worker caching
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        globIgnores: ['**/data/**'],
         runtimeCaching: [
           {
-            urlPattern: /^https:\/\/api\.coindesk\.com\/.*/i,
+            // Cache the CSV data file separately with network-first strategy
+            urlPattern: /\/data\/.*\.csv$/,
             handler: 'NetworkFirst',
             options: {
-              cacheName: 'bitcoin-api-cache',
+              cacheName: 'btc-data-cache',
               expiration: {
-                maxEntries: 10,
-                maxAgeSeconds: 60 // 1 minute cache
-              },
-              cacheableResponse: {
-                statuses: [0, 200]
+                maxEntries: 1,
+                maxAgeSeconds: 86400 // 1 day cache
               }
             }
           }
@@ -55,4 +64,13 @@ export default defineConfig({
       }
     })
   ],
+  // Copy data folder to the build output
+  publicDir: 'public',
+  build: {
+    rollupOptions: {
+      input: {
+        main: './index.html',
+      }
+    }
+  }
 })
