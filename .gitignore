@@ -25,4 +25,9 @@ dist-ssr
 
 .vercel
 
+.vite/
+  deps/
+  cache/
+
+
 data/btcusd_1-min_data.csv
