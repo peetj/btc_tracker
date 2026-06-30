@@ -587,7 +587,7 @@ const ChartSection = ({ data, range, setRange, loading }) => {
       dateStr: new Date(d.timestamp).toLocaleDateString(undefined, {
         month: 'short',
         day: 'numeric',
-        year: range === 'ALL' ? '2-digit' : undefined
+        year: (range === 'ALL' || range === '5Y' || range === '1Y') ? '2-digit' : undefined
       })
     }));
   }, [data, range]);
