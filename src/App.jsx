@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { TrendingUp, TrendingDown, Sun, Moon, RefreshCw, AlertTriangle, Database, Wifi, FileText, Plus } from 'lucide-react';
 
@@ -41,6 +41,21 @@ const PERFORMANCE_PERIODS = [
   { id: '5Y', label: '5 years', type: 'duration', ms: 1825 * ONE_DAY_MS },
   { id: '10Y', label: '10 years', type: 'duration', ms: 3650 * ONE_DAY_MS },
   { id: 'ALL', label: 'All time', type: 'all' }
+];
+
+const MONTHLY_VISUAL_THEMES = [
+  { title: 'Genesis Frost', caption: 'Cold conviction, clean blocks.', light: ['#fff7ed', '#dbeafe'], dark: ['#1e293b', '#172554'], accent: '#f97316', orbit: '#38bdf8' },
+  { title: 'Hash Bloom', caption: 'Momentum begins under the surface.', light: ['#fefce8', '#e0f2fe'], dark: ['#1f2937', '#0f172a'], accent: '#fb7185', orbit: '#f59e0b' },
+  { title: 'Spring Ledger', caption: 'Network energy compounding quietly.', light: ['#f0fdf4', '#e0e7ff'], dark: ['#14532d', '#1e1b4b'], accent: '#22c55e', orbit: '#60a5fa' },
+  { title: 'Halving Sun', caption: 'Supply pressure meets brighter skies.', light: ['#fff7ed', '#fde68a'], dark: ['#7c2d12', '#1f2937'], accent: '#f97316', orbit: '#facc15' },
+  { title: 'Cobalt Flow', caption: 'Capital rotates, price structure forms.', light: ['#eff6ff', '#dbeafe'], dark: ['#0f172a', '#172554'], accent: '#3b82f6', orbit: '#f97316' },
+  { title: 'Solstice Run', caption: 'Long daylight, longer risk appetite.', light: ['#fff1f2', '#fde68a'], dark: ['#3f0d12', '#451a03'], accent: '#fb7185', orbit: '#f59e0b' },
+  { title: 'Midyear Range', caption: 'July often looks calm until momentum picks a side.', light: ['#fef2f2', '#fee2e2'], dark: ['#3f0d12', '#111827'], accent: '#ef4444', orbit: '#f97316' },
+  { title: 'Aurora Blocks', caption: 'Cooling air, bright tapes, clean trend.', light: ['#ecfeff', '#e0f2fe'], dark: ['#0f172a', '#164e63'], accent: '#06b6d4', orbit: '#f97316' },
+  { title: 'Autumn Nodes', caption: 'Network steadies while sentiment shifts.', light: ['#fff7ed', '#fde68a'], dark: ['#292524', '#78350f'], accent: '#f59e0b', orbit: '#22c55e' },
+  { title: 'Voltage Rain', caption: 'Liquidity flashes through the order book.', light: ['#f5f3ff', '#dbeafe'], dark: ['#1e1b4b', '#0f172a'], accent: '#8b5cf6', orbit: '#38bdf8' },
+  { title: 'Miner Night', caption: 'Difficulty rises in the long dark.', light: ['#f8fafc', '#e2e8f0'], dark: ['#111827', '#020617'], accent: '#94a3b8', orbit: '#f97316' },
+  { title: 'Year-End Signal', caption: 'Cycle closes, next thesis loads.', light: ['#ecfccb', '#dbeafe'], dark: ['#0f172a', '#14532d'], accent: '#84cc16', orbit: '#60a5fa' }
 ];
 
 const normalizeCurrencyCode = (value) => value.trim().toLowerCase();
@@ -147,6 +162,16 @@ const formatTime = (timestamp) => new Date(timestamp).toLocaleString('en-US', {
   hour: '2-digit',
   minute: '2-digit'
 });
+
+const monthLabel = (timestamp = Date.now()) => new Date(timestamp).toLocaleString('en-US', {
+  month: 'long',
+  timeZone: 'UTC'
+});
+
+const getMonthlyVisualTheme = (timestamp = Date.now()) => {
+  const monthIndex = new Date(timestamp).getUTCMonth();
+  return MONTHLY_VISUAL_THEMES[monthIndex];
+};
 
 const mergeSeriesByTimestamp = (...seriesList) => {
   const merged = new Map();
@@ -788,7 +813,7 @@ const CurrencyControls = ({
   onPendingCurrencyChange,
   onAddCurrency
 }) => (
-  <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-xl border border-slate-100 dark:border-slate-700 mb-6">
+  <div className="bg-white theme-panel rounded-2xl p-4 shadow-xl border border-slate-100 dark:border-slate-700 mb-6">
     <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
       <div className="min-w-0">
         <h3 className="text-sm font-semibold text-slate-800 dark:text-white">Display Currency</h3>
@@ -798,7 +823,7 @@ const CurrencyControls = ({
       </div>
 
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 min-w-0">
-        <div className="min-w-0 max-w-full overflow-x-auto whitespace-nowrap pb-1">
+        <div className="min-w-0 max-w-full overflow-x-auto whitespace-nowrap pb-1 soft-scrollbar-x">
           <div className="flex flex-nowrap gap-2">
             {pinnedCurrencies.map((currency) => (
               <button
@@ -807,7 +832,7 @@ const CurrencyControls = ({
                 className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors shrink-0 ${
                   selectedCurrency === currency
                     ? 'bg-orange-500 text-white'
-                    : 'bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    : 'bg-slate-100 dark:bg-slate-950/80 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800'
                 }`}
               >
                 {currency.toUpperCase()}
@@ -822,7 +847,7 @@ const CurrencyControls = ({
             value={pendingCurrency}
             onChange={(event) => onPendingCurrencyChange(event.target.value)}
             placeholder="Add fiat"
-            className="w-28 px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-400"
+            className="w-28 px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950/80 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-400"
           />
           <button
             onClick={onAddCurrency}
@@ -860,7 +885,7 @@ const DataLog = ({ data, durationId, currency }) => {
 
   if (filteredData.length === 0) {
     return (
-      <div className="p-8 text-center text-slate-500 dark:text-slate-400 text-sm border-t border-slate-200 dark:border-slate-700">
+      <div className="p-8 text-center text-slate-500 dark:text-slate-400 text-sm border-t border-slate-200 dark:border-slate-800">
         No data points found for this period in the current dataset.
       </div>
     );
@@ -868,7 +893,7 @@ const DataLog = ({ data, durationId, currency }) => {
 
   return (
     <div className="animate-in fade-in slide-in-from-top-4 duration-300">
-      <div className="flex items-center justify-between px-4 py-2 bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+      <div className="flex items-center justify-between px-4 py-2 bg-slate-50 dark:bg-slate-950/70 border-b border-slate-200 dark:border-slate-800 text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
         <div className="w-1/3">Timestamp</div>
         <div className="w-1/3 text-right">Price</div>
         <div className="w-1/3 text-right">Change</div>
@@ -883,7 +908,7 @@ const DataLog = ({ data, durationId, currency }) => {
           return (
             <div
               key={point.timestamp}
-              className="flex items-center justify-between px-4 py-2 border-b border-slate-100 dark:border-slate-700/50 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors"
+              className="flex items-center justify-between px-4 py-2 border-b border-slate-100 dark:border-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors"
             >
               <div className="w-1/3 text-slate-600 dark:text-slate-400">
                 {formatTime(point.timestamp)}
@@ -904,7 +929,7 @@ const DataLog = ({ data, durationId, currency }) => {
           );
         })}
       </div>
-      <div className="px-4 py-2 bg-slate-50 dark:bg-slate-900/50 border-t border-slate-200 dark:border-slate-700 text-xs text-center text-slate-400">
+      <div className="px-4 py-2 bg-slate-50 dark:bg-slate-950/70 border-t border-slate-200 dark:border-slate-800 text-xs text-center text-slate-400">
         Showing {filteredData.length} data points
       </div>
     </div>
@@ -916,12 +941,13 @@ const PriceCard = ({
   previousData,
   currency,
   loading,
+  refreshing,
   onRefresh,
   fetchStatus
 }) => {
   if (loading && !currentData) {
     return (
-      <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-xl transition-all duration-300 border border-slate-100 dark:border-slate-700">
+      <div className="bg-white theme-panel rounded-2xl p-6 shadow-xl transition-all duration-300 border border-slate-100 dark:border-slate-700">
         <div className="flex flex-col items-center justify-center py-8 space-y-4">
           <div className="relative">
             <div className="w-20 h-20 border-4 border-slate-200 dark:border-slate-700 rounded-full"></div>
@@ -942,50 +968,90 @@ const PriceCard = ({
   const previousPrice = previousData ? previousData.close : price;
   const change = previousPrice ? ((price - previousPrice) / previousPrice) * 100 : 0;
   const isPositive = change >= 0;
+  const visualTheme = getMonthlyVisualTheme();
 
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-xl transition-all duration-300 border border-slate-100 dark:border-slate-700">
-      <div className="flex justify-between items-start mb-4">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-full bg-orange-500 flex items-center justify-center shadow-lg shadow-orange-500/20">
-            <span className="text-white font-bold text-lg">BTC</span>
-          </div>
-          <div>
-            <h2 className="text-sm font-medium text-slate-500 dark:text-slate-400">
-              Bitcoin Price ({currency.toUpperCase()})
-            </h2>
-            <div className="flex items-center space-x-2">
-              <StatusBadge
-                source={fetchStatus.source}
-                missingDays={fetchStatus.missingDays || 0}
-                isIntradayEnabled={fetchStatus.isIntradayEnabled}
-                currency={currency}
-              />
-              {fetchStatus.error && (
-                <span className="text-xs text-red-500 hidden sm:inline-block">
-                  {fetchStatus.error}
-                </span>
-              )}
-            </div>
-          </div>
+    <div
+      className="relative overflow-hidden bg-white theme-panel hero-panel rounded-[30px] p-6 lg:p-7 shadow-xl transition-all duration-300 border border-slate-200/60 dark:border-slate-800/80"
+      style={{
+        backgroundImage: `linear-gradient(120deg, rgba(255,255,255,0.98) 0%, rgba(255,255,255,0.93) 48%, transparent 100%), radial-gradient(circle at 78% 24%, ${visualTheme.accent}22, transparent 24%), radial-gradient(circle at 88% 84%, ${visualTheme.orbit}18, transparent 22%)`
+      }}
+    >
+      <div className="pointer-events-none absolute inset-y-0 right-0 hidden lg:block w-[40%]">
+        <div className="absolute inset-0 bg-gradient-to-l from-transparent via-transparent to-white/10 dark:to-slate-950/6" />
+        <div className="absolute inset-y-0 right-0 left-0">
+          <MonthlyBitcoinVisual
+            currentData={currentData}
+            currency={currency}
+            change={change}
+            compact
+          />
         </div>
-        <button
-          onClick={onRefresh}
-          disabled={loading}
-          className={`p-2 rounded-xl bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors ${loading ? 'animate-spin' : ''}`}
-        >
-          <RefreshCw size={18} className="text-slate-600 dark:text-slate-300" />
-        </button>
       </div>
 
-      <div className="mb-6">
-        <div className="text-4xl font-bold text-slate-900 dark:text-white tracking-tight mb-2">
-          {loading ? '---' : formatCurrency(price, currency)}
+      <div className="relative z-10 max-w-3xl lg:pr-[37%]">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center space-x-3">
+              <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center shadow-lg shadow-orange-500/25">
+                <span className="text-white font-bold text-lg">BTC</span>
+              </div>
+              <div>
+                <h2 className="text-sm font-medium text-slate-500 dark:text-slate-400">
+                  Bitcoin Price ({currency.toUpperCase()})
+                </h2>
+                <div className="mt-1 flex items-center flex-wrap gap-2">
+                  <StatusBadge
+                    source={fetchStatus.source}
+                    missingDays={fetchStatus.missingDays || 0}
+                    isIntradayEnabled={fetchStatus.isIntradayEnabled}
+                    currency={currency}
+                  />
+                  {fetchStatus.error && (
+                    <span className="text-xs text-red-500 hidden sm:inline-block">
+                      {fetchStatus.error}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={onRefresh}
+            disabled={loading || refreshing}
+            className={`shrink-0 inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/85 px-3 py-2 text-sm font-medium text-slate-700 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-900 transition-colors ${refreshing ? 'animate-spin' : ''}`}
+          >
+            <RefreshCw size={16} />
+            <span className="hidden sm:inline">{refreshing ? 'Refreshing' : 'Refresh'}</span>
+          </button>
         </div>
-        <div className={`flex items-center ${isPositive ? 'text-emerald-500' : 'text-rose-500'} font-medium`}>
-          {isPositive ? <TrendingUp size={20} className="mr-1" /> : <TrendingDown size={20} className="mr-1" />}
-          <span className="text-lg">{Math.abs(change).toFixed(2)}%</span>
-          <span className="text-slate-400 dark:text-slate-500 text-sm ml-2 font-normal">24h change</span>
+
+        <div className="mt-8 rounded-[28px] border border-slate-200/70 dark:border-slate-800/90 bg-white/70 dark:bg-slate-950/36 backdrop-blur-sm p-6 sm:p-7">
+          <div className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
+            Spot price
+          </div>
+          <div className="mt-4 text-5xl sm:text-6xl lg:text-7xl font-black text-slate-950 dark:text-slate-50 tracking-[-0.04em] leading-none">
+            {formatCurrency(price, currency)}
+          </div>
+          <div className={`mt-5 inline-flex items-center rounded-full px-3 py-1.5 ${isPositive ? 'bg-emerald-500/12 text-emerald-600 dark:text-emerald-300' : 'bg-rose-500/12 text-rose-600 dark:text-rose-300'} font-semibold`}>
+            {isPositive ? <TrendingUp size={18} className="mr-1.5" /> : <TrendingDown size={18} className="mr-1.5" />}
+            <span className="text-lg">{Math.abs(change).toFixed(2)}%</span>
+            <span className="ml-2 text-sm font-medium opacity-80">24h change</span>
+          </div>
+
+          <div className="mt-6 max-w-xl text-base leading-7 text-slate-800 dark:text-slate-100">
+            <span className="font-semibold text-slate-950 dark:text-white">{visualTheme.title}.</span>{' '}
+            {visualTheme.caption}
+          </div>
+        </div>
+
+        <div className="mt-5 lg:hidden">
+          <MonthlyBitcoinVisual
+            currentData={currentData}
+            currency={currency}
+            change={change}
+            compact
+          />
         </div>
       </div>
     </div>
@@ -1015,13 +1081,13 @@ const MarketStatsStrip = ({ performanceStats, stats24h, currency, loading }) => 
   ];
 
   return (
-    <div className="mt-6 bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-xl border border-slate-100 dark:border-slate-700">
-      <div className="overflow-x-auto pb-1">
+    <div className="mt-6 bg-white theme-panel rounded-2xl p-4 shadow-xl border border-slate-100 dark:border-slate-700">
+      <div className="overflow-x-auto pb-1 soft-scrollbar-x">
         <div className="grid grid-flow-col auto-cols-[minmax(132px,1fr)] gap-3 min-w-max">
           {summaryCards.map((card) => (
             <div
               key={card.id}
-              className="rounded-2xl bg-slate-50 dark:bg-slate-900/60 px-4 py-3 border border-slate-100 dark:border-slate-700"
+              className="rounded-2xl bg-slate-50 dark:bg-slate-900/60 theme-subpanel px-4 py-3 border border-slate-100 dark:border-slate-700"
             >
               <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{card.label}</div>
               <div className={`mt-2 text-sm font-semibold ${
@@ -1041,6 +1107,104 @@ const MarketStatsStrip = ({ performanceStats, stats24h, currency, loading }) => 
   );
 };
 
+const MonthlyBitcoinVisual = ({ currentData, currency, change, compact = false }) => {
+  const { isDarkMode } = useTheme();
+  const monthIndex = new Date().getUTCMonth();
+  const visualTheme = getMonthlyVisualTheme();
+  const [colorA, colorB] = isDarkMode ? visualTheme.dark : visualTheme.light;
+  const waveSeed = monthIndex + 3;
+  const sparkPath = Array.from({ length: 7 }, (_, index) => {
+    const x = 20 + (index * 60);
+    const variance = ((index * waveSeed * 17) % 46) - 18;
+    const yBase = 158 - (index * 11);
+    return `${index === 0 ? 'M' : 'L'} ${x} ${yBase + variance}`;
+  }).join(' ');
+
+  return (
+    <div
+      className={`relative overflow-hidden ${compact ? 'h-full min-h-[190px] rounded-[24px] lg:rounded-l-none lg:rounded-r-[28px]' : 'min-h-[250px] rounded-[28px]'}`}
+      style={{
+        background: `linear-gradient(135deg, ${colorA}, ${colorB})`
+      }}
+    >
+      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(8,12,24,0.12),rgba(8,12,24,0.32))] dark:bg-[linear-gradient(180deg,rgba(2,6,23,0.16),rgba(2,6,23,0.58))]" />
+      <div
+        className="absolute -left-10 top-10 h-40 w-40 rounded-full blur-3xl opacity-80"
+        style={{ backgroundColor: `${visualTheme.orbit}55` }}
+      />
+      <div
+        className="absolute -right-10 bottom-2 h-44 w-44 rounded-full blur-3xl opacity-75"
+        style={{ backgroundColor: `${visualTheme.accent}55` }}
+      />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.22),transparent_38%)] dark:bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.06),transparent_32%)]" />
+
+      <svg viewBox="0 0 420 260" className="absolute inset-0 h-full w-full opacity-90">
+        <defs>
+          <linearGradient id="btc-wave" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor={visualTheme.orbit} />
+            <stop offset="100%" stopColor={visualTheme.accent} />
+          </linearGradient>
+        </defs>
+        <path
+          d="M 0 220 C 80 168, 145 245, 240 188 S 352 138, 420 188 L 420 260 L 0 260 Z"
+          fill={isDarkMode ? 'rgba(15, 23, 42, 0.48)' : 'rgba(255,255,255,0.34)'}
+        />
+        <path
+          d={sparkPath}
+          fill="none"
+          stroke="url(#btc-wave)"
+          strokeWidth="7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <circle cx="300" cy="82" r="48" fill={isDarkMode ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.6)'} />
+        <circle cx="300" cy="82" r="39" fill={visualTheme.accent} />
+        <text x="300" y="95" textAnchor="middle" fontSize="34" fontWeight="700" fill="#ffffff">₿</text>
+        <circle cx="76" cy="62" r="6" fill={visualTheme.orbit} opacity="0.9" />
+        <circle cx="102" cy="46" r="3.5" fill={visualTheme.accent} opacity="0.85" />
+        <circle cx="124" cy="72" r="2.5" fill={visualTheme.orbit} opacity="0.65" />
+      </svg>
+
+      <div className={`relative z-10 flex h-full flex-col justify-between ${compact ? 'p-6' : 'p-6'}`}>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-white/80">
+              {monthLabel()}
+            </p>
+            <h3 className={`${compact ? 'mt-1 text-[1.85rem]' : 'mt-2 text-2xl'} font-semibold text-white tracking-tight`}>
+              {visualTheme.title}
+            </h3>
+            <p className={`mt-2 max-w-[18rem] ${compact ? 'text-sm' : 'text-sm'} text-white/88`}>
+              {visualTheme.caption}
+            </p>
+          </div>
+          <div className="rounded-full border border-white/18 bg-black/20 px-3 py-1 text-xs font-medium text-white backdrop-blur">
+            {currency.toUpperCase()}
+          </div>
+        </div>
+
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <div className="text-xs uppercase tracking-[0.22em] text-white/65">
+              {monthLabel()} frame
+            </div>
+            <div className={`mt-2 ${compact ? 'text-sm' : 'text-sm'} font-semibold text-white`}>
+              {currentData ? formatCurrency(currentData.close, currency) : '--'}
+            </div>
+          </div>
+          <div className={`rounded-2xl px-3 py-2 text-sm font-semibold backdrop-blur ${
+            change >= 0
+              ? 'bg-emerald-500/18 text-emerald-100'
+              : 'bg-rose-500/18 text-rose-100'
+          }`}>
+            {change >= 0 ? '+' : ''}{change.toFixed(2)}%
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ChartSection = ({ data, range, setRange, loading, currency, dataModeLabel }) => {
   const { isDarkMode } = useTheme();
 
@@ -1054,7 +1218,7 @@ const ChartSection = ({ data, range, setRange, loading, currency, dataModeLabel 
     : 0;
 
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 shadow-xl border border-slate-100 dark:border-slate-700 mt-6">
+    <div className="bg-white theme-panel rounded-2xl p-6 shadow-xl border border-slate-100 dark:border-slate-700 mt-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
         <div>
           <h3 className="text-lg font-semibold text-slate-800 dark:text-white">Price History</h3>
@@ -1071,7 +1235,7 @@ const ChartSection = ({ data, range, setRange, loading, currency, dataModeLabel 
           )}
         </div>
 
-        <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-lg flex-wrap">
+        <div className="flex bg-slate-100 dark:bg-slate-950/80 p-1 rounded-lg flex-wrap">
           {Object.keys(TIME_RANGES).map((key) => (
             <button
               key={key}
@@ -1079,7 +1243,7 @@ const ChartSection = ({ data, range, setRange, loading, currency, dataModeLabel 
               disabled={loading}
               className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all ${
                 range === key
-                  ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
                   : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
               } ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
@@ -1091,7 +1255,7 @@ const ChartSection = ({ data, range, setRange, loading, currency, dataModeLabel 
 
       <div className="h-[300px] w-full relative">
         {loading ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-50/50 dark:bg-slate-900/50 rounded-lg">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-50/50 dark:bg-slate-900/50 theme-overlay-surface rounded-lg">
             <div className="flex flex-col items-center space-y-4">
               <div className="relative">
                 <div className="w-16 h-16 border-4 border-slate-200 dark:border-slate-700 rounded-full"></div>
@@ -1157,11 +1321,13 @@ const BitcoinTracker = () => {
   const { isDarkMode, toggleTheme } = useTheme();
   const [usdDailyData, setUsdDailyData] = useState([]);
   const [usdHourlyData, setUsdHourlyData] = useState([]);
+  const hasVisibleBaseDataRef = useRef(false);
   const [fxSeriesByCurrency, setFxSeriesByCurrency] = useState({
     usd: [{ timestamp: HISTORY_START_TIMESTAMP, rate: 1 }]
   });
   const [activeFxCurrency, setActiveFxCurrency] = useState('usd');
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [currencyLoading, setCurrencyLoading] = useState(false);
   const [range, setRange] = useState('1W');
   const [selectedCurrency, setSelectedCurrency] = useState('usd');
@@ -1219,42 +1385,63 @@ const BitcoinTracker = () => {
   }, [pinnedCurrencies]);
 
   const loadBaseData = useCallback(async (forceFetch = false, currency = 'usd') => {
-    setLoading(true);
-    setFetchStatus((previous) => ({ ...previous, source: 'FETCHING' }));
+    const hasVisibleData = hasVisibleBaseDataRef.current;
+    const isBlockingLoad = !hasVisibleData;
 
-    const tasks = [
-      CryptoService.loadUsdDailySeries(),
-      CryptoService.loadUsdHourlySeries(forceFetch)
-    ];
-
-    if (currency !== 'usd' && forceFetch) {
-      tasks.push(CryptoService.loadFxRates(currency));
+    if (isBlockingLoad) {
+      setLoading(true);
+      setFetchStatus((previous) => ({ ...previous, source: 'FETCHING' }));
+    } else {
+      setRefreshing(true);
     }
 
-    const [dailyResult, hourlyResult, fxResult] = await Promise.all(tasks);
+    try {
+      const tasks = [
+        CryptoService.loadUsdDailySeries(),
+        CryptoService.loadUsdHourlySeries(forceFetch)
+      ];
 
-    if (fxResult?.data?.length > 0) {
-      setFxSeriesByCurrency((previous) => ({
+      if (currency !== 'usd' && forceFetch) {
+        tasks.push(CryptoService.loadFxRates(currency));
+      }
+
+      const [dailyResult, hourlyResult, fxResult] = await Promise.all(tasks);
+
+      if (fxResult?.data?.length > 0) {
+        setFxSeriesByCurrency((previous) => ({
+          ...previous,
+          [currency]: fxResult.data
+        }));
+        setActiveFxCurrency(currency);
+      }
+
+      const errors = [dailyResult.error, hourlyResult.error, fxResult?.error].filter(Boolean);
+      const nextSource = dailyResult.source === 'LIVE_API' || hourlyResult.source === 'LIVE_API' || fxResult?.source === 'LIVE_API'
+        ? 'LIVE_API'
+        : (dailyResult.missingDays > 0 ? 'STALE' : 'CACHE_ONLY');
+
+      hasVisibleBaseDataRef.current = dailyResult.data.length > 0 || hourlyResult.data.length > 0;
+
+      setUsdDailyData(dailyResult.data);
+      setUsdHourlyData(hourlyResult.data);
+      setFetchStatus({
+        source: nextSource,
+        error: errors.length > 0 ? errors.join(' | ') : null,
+        missingDays: dailyResult.missingDays || 0,
+        isIntradayEnabled: hourlyResult.data.length > 0
+      });
+    } catch (error) {
+      setFetchStatus((previous) => ({
         ...previous,
-        [currency]: fxResult.data
+        source: hasVisibleData ? previous.source : 'ERROR',
+        error: error instanceof Error ? error.message : 'Unknown refresh error'
       }));
-      setActiveFxCurrency(currency);
+    } finally {
+      if (isBlockingLoad) {
+        setLoading(false);
+      }
+      setRefreshing(false);
     }
-
-    const errors = [dailyResult.error, hourlyResult.error, fxResult?.error].filter(Boolean);
-    const nextSource = dailyResult.source === 'LIVE_API' || hourlyResult.source === 'LIVE_API' || fxResult?.source === 'LIVE_API'
-      ? 'LIVE_API'
-      : (dailyResult.missingDays > 0 ? 'STALE' : 'CACHE_ONLY');
-
-    setUsdDailyData(dailyResult.data);
-    setUsdHourlyData(hourlyResult.data);
-    setFetchStatus({
-      source: nextSource,
-      error: errors.length > 0 ? errors.join(' | ') : null,
-      missingDays: dailyResult.missingDays || 0,
-      isIntradayEnabled: hourlyResult.data.length > 0
-    });
-    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -1404,13 +1591,14 @@ const BitcoinTracker = () => {
   const currentData = latestSeries.length > 0 ? latestSeries[latestSeries.length - 1] : null;
   const stats24h = useMemo(() => buildRollingWindowStats(latestSeries, currentData), [latestSeries, currentData]);
   const performanceStats = useMemo(() => buildPerformanceStats(latestSeries, currentData), [latestSeries, currentData]);
+  const blockingLoad = loading || (currencyLoading && selectedCurrency !== activeFxCurrency);
 
   return (
-    <div className={`min-h-screen transition-colors duration-300 ${isDarkMode ? 'bg-slate-900 text-slate-200' : 'bg-slate-50 text-slate-800'}`}>
+    <div className={`min-h-screen theme-shell transition-colors duration-300 ${isDarkMode ? 'bg-slate-950 text-slate-200' : 'bg-slate-50 text-slate-800'}`}>
       <div className="max-w-5xl mx-auto px-4 py-8">
         <div className="flex justify-between items-center mb-8">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Crypto Dashboard</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Nexgen Bitcoin Price Graph</h1>
             <p className="text-sm text-slate-500 dark:text-slate-400">Bitcoin history with hourly zoom and fiat conversion</p>
           </div>
           <div className="flex items-center space-x-3">
@@ -1447,7 +1635,8 @@ const BitcoinTracker = () => {
           currentData={currentData}
           previousData={stats24h.previousPoint}
           currency={selectedCurrency}
-          loading={loading || currencyLoading}
+          loading={blockingLoad}
+          refreshing={refreshing}
           onRefresh={() => loadBaseData(true, selectedCurrency)}
           fetchStatus={fetchStatus}
         />
@@ -1456,20 +1645,20 @@ const BitcoinTracker = () => {
           performanceStats={performanceStats}
           stats24h={stats24h}
           currency={selectedCurrency}
-          loading={loading || currencyLoading}
+          loading={blockingLoad}
         />
 
         <ChartSection
           data={chartData}
           range={range}
           setRange={setRange}
-          loading={loading || currencyLoading}
+          loading={blockingLoad}
           currency={selectedCurrency}
           dataModeLabel={chartDataModeLabel}
         />
 
-        <div className="mt-6 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-100 dark:border-slate-700 overflow-hidden">
-          <div className="p-4 border-b border-slate-100 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="mt-6 bg-white theme-panel rounded-2xl shadow-xl border border-slate-100 dark:border-slate-700 overflow-hidden">
+          <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-2">
               <label className="relative inline-flex items-center cursor-pointer">
                 <input
@@ -1478,8 +1667,8 @@ const BitcoinTracker = () => {
                   checked={showLog}
                   onChange={(event) => setShowLog(event.target.checked)}
                 />
-                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-orange-300 dark:peer-focus:ring-orange-800 rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-orange-500"></div>
-                <span className="ml-3 text-sm font-medium text-slate-900 dark:text-slate-300 flex items-center">
+                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-orange-300 dark:peer-focus:ring-orange-800 rounded-full peer dark:bg-slate-950/80 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-700 peer-checked:bg-orange-500"></div>
+                <span className="ml-3 text-sm font-medium text-slate-700 dark:text-slate-300 flex items-center">
                   <FileText size={16} className="mr-2 text-slate-500" />
                   Raw Data Inspector
                 </span>
@@ -1487,14 +1676,14 @@ const BitcoinTracker = () => {
             </div>
 
             {showLog && (
-              <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-lg self-start sm:self-auto">
+              <div className="flex bg-slate-100 dark:bg-slate-950/80 p-1 rounded-lg self-start sm:self-auto">
                 {LOG_DURATIONS.map((duration) => (
                   <button
                     key={duration.id}
                     onClick={() => setLogDuration(duration.id)}
                     className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center ${
                       logDuration === duration.id
-                        ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm'
+                        ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
                         : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
                     }`}
                   >
