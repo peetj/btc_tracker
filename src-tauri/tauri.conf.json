@@ -14,17 +14,19 @@
       {
         "title": "Nexgen Bitcoin Price Graph",
         "label": "main",
-        "width": 1440,
-        "height": 960,
-        "minWidth": 980,
-        "minHeight": 720,
+        "width": 1180,
+        "height": 760,
+        "minWidth": 860,
+        "minHeight": 560,
         "center": true,
         "resizable": true,
+        "minimizable": true,
         "maximizable": false,
         "fullscreen": false,
         "transparent": true,
         "decorations": false,
-        "shadow": false
+        "shadow": false,
+        "skipTaskbar": false
       }
     ],
     "security": {
