@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { TrendingUp, TrendingDown, Sun, Moon, RefreshCw, AlertTriangle, Database, Wifi, FileText, Plus } from 'lucide-react';
+import { TrendingUp, TrendingDown, Sun, Moon, RefreshCw, AlertTriangle, Database, Wifi, FileText, Plus, Monitor, Pin, PinOff, Minus, X } from 'lucide-react';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -12,7 +12,8 @@ const SUPPORTED_CURRENCIES_TTL_MS = 7 * ONE_DAY_MS;
 
 const STORAGE_KEYS = {
   pinnedCurrencies: 'btc_tracker_pinned_currencies',
-  supportedCurrencies: 'btc_tracker_supported_fiat_currencies_v1'
+  supportedCurrencies: 'btc_tracker_supported_fiat_currencies_v1',
+  desktopWidgetSettings: 'btc_tracker_desktop_widget_settings_v1'
 };
 
 const TIME_RANGES = {
@@ -80,6 +81,21 @@ const readPinnedCurrencies = () => {
 
 const savePinnedCurrencies = (currencies) => {
   localStorage.setItem(STORAGE_KEYS.pinnedCurrencies, JSON.stringify(uniqueCurrencies(currencies)));
+};
+
+const readDesktopWidgetSettings = () => {
+  const stored = readStoredJson(STORAGE_KEYS.desktopWidgetSettings);
+  return {
+    glassMode: stored?.glassMode ?? true,
+    alwaysOnTop: stored?.alwaysOnTop ?? false
+  };
+};
+
+const saveDesktopWidgetSettings = (settings) => {
+  localStorage.setItem(STORAGE_KEYS.desktopWidgetSettings, JSON.stringify({
+    glassMode: Boolean(settings.glassMode),
+    alwaysOnTop: Boolean(settings.alwaysOnTop)
+  }));
 };
 
 const toUtcDayTimestamp = (timestamp) => {
@@ -803,6 +819,78 @@ const StatusBadge = ({ source, missingDays, isIntradayEnabled, currency }) => {
   );
 };
 
+const DesktopToolbar = ({
+  glassMode,
+  alwaysOnTop,
+  onToggleGlassMode,
+  onToggleAlwaysOnTop,
+  onToggleTheme,
+  onMinimize,
+  onClose,
+  isDarkMode
+}) => (
+  <div className="px-4 pt-4 md:px-6 md:pt-6">
+    <div className="theme-panel rounded-2xl border border-slate-200/70 dark:border-slate-800/80 px-3 py-3 shadow-lg">
+      <div className="flex flex-wrap items-center gap-3">
+        <div
+          data-tauri-drag-region
+          className="min-w-0 flex-1 rounded-xl border border-slate-200/70 bg-white/55 px-4 py-3 text-slate-700 shadow-sm dark:border-slate-800/70 dark:bg-slate-950/35 dark:text-slate-200"
+        >
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-400 to-orange-600 text-white shadow-lg shadow-orange-500/25">
+              <Monitor size={18} />
+            </div>
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold text-slate-900 dark:text-white">Desktop Widget Mode</div>
+              <div className="truncate text-xs text-slate-500 dark:text-slate-400">Drag this strip to place the widget on your desktop.</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={onToggleGlassMode}
+            className="desktop-control inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition-colors"
+          >
+            <Monitor size={14} />
+            {glassMode ? 'Glass on' : 'Glass off'}
+          </button>
+          <button
+            onClick={onToggleAlwaysOnTop}
+            className={`desktop-control inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs font-semibold transition-colors ${
+              alwaysOnTop ? 'ring-2 ring-orange-400/70' : ''
+            }`}
+          >
+            {alwaysOnTop ? <Pin size={14} /> : <PinOff size={14} />}
+            {alwaysOnTop ? 'Pinned' : 'Pin'}
+          </button>
+          <button
+            onClick={onToggleTheme}
+            className="desktop-control inline-flex h-10 w-10 items-center justify-center rounded-full transition-colors"
+            aria-label="Toggle theme"
+          >
+            {isDarkMode ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+          <button
+            onClick={onMinimize}
+            className="desktop-control inline-flex h-10 w-10 items-center justify-center rounded-full transition-colors"
+            aria-label="Minimize window"
+          >
+            <Minus size={16} />
+          </button>
+          <button
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-rose-200 bg-rose-500/12 text-rose-600 transition-colors hover:bg-rose-500/18 dark:border-rose-500/30 dark:text-rose-300"
+            aria-label="Close window"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
 const CurrencyControls = ({
   selectedCurrency,
   pinnedCurrencies,
@@ -1319,6 +1407,8 @@ const ChartSection = ({ data, range, setRange, loading, currency, dataModeLabel 
 // ==================== MAIN APP ====================
 const BitcoinTracker = () => {
   const { isDarkMode, toggleTheme } = useTheme();
+  const desktopSettingsRef = useRef(readDesktopWidgetSettings());
+  const desktopWindowRef = useRef(null);
   const [usdDailyData, setUsdDailyData] = useState([]);
   const [usdHourlyData, setUsdHourlyData] = useState([]);
   const hasVisibleBaseDataRef = useRef(false);
@@ -1343,6 +1433,9 @@ const BitcoinTracker = () => {
   });
   const [showLog, setShowLog] = useState(false);
   const [logDuration, setLogDuration] = useState('1D');
+  const [isDesktopShell, setIsDesktopShell] = useState(false);
+  const [glassMode, setGlassMode] = useState(desktopSettingsRef.current.glassMode);
+  const [alwaysOnTop, setAlwaysOnTop] = useState(desktopSettingsRef.current.alwaysOnTop);
 
   useEffect(() => {
     let isCancelled = false;
@@ -1383,6 +1476,38 @@ const BitcoinTracker = () => {
       isCancelled = true;
     };
   }, [pinnedCurrencies]);
+
+  useEffect(() => {
+    saveDesktopWidgetSettings({ glassMode, alwaysOnTop });
+  }, [glassMode, alwaysOnTop]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const connectDesktopShell = async () => {
+      try {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window');
+        if (isCancelled) return;
+
+        desktopWindowRef.current = getCurrentWindow();
+        setIsDesktopShell(true);
+      } catch {
+        desktopWindowRef.current = null;
+      }
+    };
+
+    connectDesktopShell();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isDesktopShell || !desktopWindowRef.current) return;
+
+    desktopWindowRef.current.setAlwaysOnTop(alwaysOnTop).catch(() => {});
+  }, [alwaysOnTop, isDesktopShell]);
 
   const loadBaseData = useCallback(async (forceFetch = false, currency = 'usd') => {
     const hasVisibleData = hasVisibleBaseDataRef.current;
@@ -1544,6 +1669,14 @@ const BitcoinTracker = () => {
     setCurrencyError('');
   };
 
+  const handleDesktopMinimize = () => {
+    desktopWindowRef.current?.minimize().catch(() => {});
+  };
+
+  const handleDesktopClose = () => {
+    desktopWindowRef.current?.close().catch(() => {});
+  };
+
   const activeFxRates = useMemo(
     () => fxSeriesByCurrency[activeFxCurrency] || [],
     [activeFxCurrency, fxSeriesByCurrency]
@@ -1592,116 +1725,141 @@ const BitcoinTracker = () => {
   const stats24h = useMemo(() => buildRollingWindowStats(latestSeries, currentData), [latestSeries, currentData]);
   const performanceStats = useMemo(() => buildPerformanceStats(latestSeries, currentData), [latestSeries, currentData]);
   const blockingLoad = loading || (currencyLoading && selectedCurrency !== activeFxCurrency);
+  const pageShellClassName = isDesktopShell ? 'desktop-canvas' : 'theme-shell';
+  const frameClassName = isDesktopShell
+    ? `desktop-widget-frame ${glassMode ? 'desktop-widget-glass' : 'desktop-widget-solid'}`
+    : '';
+  const containerClassName = isDesktopShell
+    ? 'max-w-[1420px] mx-auto px-4 py-4 md:px-5 md:py-5'
+    : 'max-w-5xl mx-auto px-4 py-8';
+  const contentClassName = isDesktopShell ? 'px-4 pb-4 md:px-6 md:pb-6' : '';
 
   return (
-    <div className={`min-h-screen theme-shell transition-colors duration-300 ${isDarkMode ? 'bg-slate-950 text-slate-200' : 'bg-slate-50 text-slate-800'}`}>
-      <div className="max-w-5xl mx-auto px-4 py-8">
-        <div className="flex justify-between items-center mb-8">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Nexgen Bitcoin Price Graph</h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400">Bitcoin history with hourly zoom and fiat conversion</p>
-          </div>
-          <div className="flex items-center space-x-3">
-            <button onClick={toggleTheme} className="p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors">
-              {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
-            </button>
-          </div>
-        </div>
-
-        <CurrencyControls
-          selectedCurrency={selectedCurrency}
-          pinnedCurrencies={pinnedCurrencies}
-          pendingCurrency={pendingCurrency}
-          supportedCurrencies={supportedCurrencies}
-          currencyError={currencyError}
-          onCurrencyChange={handleCurrencyChange}
-          onPendingCurrencyChange={setPendingCurrency}
-          onAddCurrency={handleAddCurrency}
-        />
-
-        {fetchStatus.error && (
-          <div className="mb-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900/50 rounded-xl p-4 flex items-start">
-            <AlertTriangle className="text-red-500 shrink-0 mt-0.5 mr-3" size={20} />
-            <div>
-              <h4 className="text-sm font-bold text-red-800 dark:text-red-200">Data Fetch Error</h4>
-              <p className="text-xs text-red-700 dark:text-red-300 mt-1">
-                {fetchStatus.error}
-              </p>
-            </div>
-          </div>
-        )}
-
-        <PriceCard
-          currentData={currentData}
-          previousData={stats24h.previousPoint}
-          currency={selectedCurrency}
-          loading={blockingLoad}
-          refreshing={refreshing}
-          onRefresh={() => loadBaseData(true, selectedCurrency)}
-          fetchStatus={fetchStatus}
-        />
-
-        <MarketStatsStrip
-          performanceStats={performanceStats}
-          stats24h={stats24h}
-          currency={selectedCurrency}
-          loading={blockingLoad}
-        />
-
-        <ChartSection
-          data={chartData}
-          range={range}
-          setRange={setRange}
-          loading={blockingLoad}
-          currency={selectedCurrency}
-          dataModeLabel={chartDataModeLabel}
-        />
-
-        <div className="mt-6 bg-white theme-panel rounded-2xl shadow-xl border border-slate-100 dark:border-slate-700 overflow-hidden">
-          <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-2">
-              <label className="relative inline-flex items-center cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="sr-only peer"
-                  checked={showLog}
-                  onChange={(event) => setShowLog(event.target.checked)}
-                />
-                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-orange-300 dark:peer-focus:ring-orange-800 rounded-full peer dark:bg-slate-950/80 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-700 peer-checked:bg-orange-500"></div>
-                <span className="ml-3 text-sm font-medium text-slate-700 dark:text-slate-300 flex items-center">
-                  <FileText size={16} className="mr-2 text-slate-500" />
-                  Raw Data Inspector
-                </span>
-              </label>
-            </div>
-
-            {showLog && (
-              <div className="flex bg-slate-100 dark:bg-slate-950/80 p-1 rounded-lg self-start sm:self-auto">
-                {LOG_DURATIONS.map((duration) => (
-                  <button
-                    key={duration.id}
-                    onClick={() => setLogDuration(duration.id)}
-                    className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center ${
-                      logDuration === duration.id
-                        ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
-                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
-                    }`}
-                  >
-                    {duration.id}
-                    <span className="hidden sm:inline ml-1 opacity-60 font-normal">- {duration.label}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {showLog && (
-            <DataLog
-              data={hourlyData.length > 0 ? hourlyData : dailyData}
-              durationId={logDuration}
-              currency={selectedCurrency}
+    <div className={`min-h-screen ${pageShellClassName} transition-colors duration-300 ${isDarkMode ? 'bg-slate-950 text-slate-200' : 'bg-slate-50 text-slate-800'}`}>
+      <div className={containerClassName}>
+        <div className={frameClassName}>
+          {isDesktopShell && (
+            <DesktopToolbar
+              glassMode={glassMode}
+              alwaysOnTop={alwaysOnTop}
+              onToggleGlassMode={() => setGlassMode((previous) => !previous)}
+              onToggleAlwaysOnTop={() => setAlwaysOnTop((previous) => !previous)}
+              onToggleTheme={toggleTheme}
+              onMinimize={handleDesktopMinimize}
+              onClose={handleDesktopClose}
+              isDarkMode={isDarkMode}
             />
           )}
+
+          <div className={contentClassName}>
+            <div className="flex justify-between items-center mb-8">
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight">Nexgen Bitcoin Price Graph</h1>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Bitcoin history with hourly zoom and fiat conversion</p>
+              </div>
+              <div className="flex items-center space-x-3">
+                <button onClick={toggleTheme} className="p-2 rounded-full hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors">
+                  {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
+                </button>
+              </div>
+            </div>
+
+            <CurrencyControls
+              selectedCurrency={selectedCurrency}
+              pinnedCurrencies={pinnedCurrencies}
+              pendingCurrency={pendingCurrency}
+              supportedCurrencies={supportedCurrencies}
+              currencyError={currencyError}
+              onCurrencyChange={handleCurrencyChange}
+              onPendingCurrencyChange={setPendingCurrency}
+              onAddCurrency={handleAddCurrency}
+            />
+
+            {fetchStatus.error && (
+              <div className="mb-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900/50 rounded-xl p-4 flex items-start">
+                <AlertTriangle className="text-red-500 shrink-0 mt-0.5 mr-3" size={20} />
+                <div>
+                  <h4 className="text-sm font-bold text-red-800 dark:text-red-200">Data Fetch Error</h4>
+                  <p className="text-xs text-red-700 dark:text-red-300 mt-1">
+                    {fetchStatus.error}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <PriceCard
+              currentData={currentData}
+              previousData={stats24h.previousPoint}
+              currency={selectedCurrency}
+              loading={blockingLoad}
+              refreshing={refreshing}
+              onRefresh={() => loadBaseData(true, selectedCurrency)}
+              fetchStatus={fetchStatus}
+            />
+
+            <MarketStatsStrip
+              performanceStats={performanceStats}
+              stats24h={stats24h}
+              currency={selectedCurrency}
+              loading={blockingLoad}
+            />
+
+            <ChartSection
+              data={chartData}
+              range={range}
+              setRange={setRange}
+              loading={blockingLoad}
+              currency={selectedCurrency}
+              dataModeLabel={chartDataModeLabel}
+            />
+
+            <div className="mt-6 bg-white theme-panel rounded-2xl shadow-xl border border-slate-100 dark:border-slate-700 overflow-hidden">
+              <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-2">
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
+                      checked={showLog}
+                      onChange={(event) => setShowLog(event.target.checked)}
+                    />
+                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-orange-300 dark:peer-focus:ring-orange-800 rounded-full peer dark:bg-slate-950/80 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-700 peer-checked:bg-orange-500"></div>
+                    <span className="ml-3 text-sm font-medium text-slate-700 dark:text-slate-300 flex items-center">
+                      <FileText size={16} className="mr-2 text-slate-500" />
+                      Raw Data Inspector
+                    </span>
+                  </label>
+                </div>
+
+                {showLog && (
+                  <div className="flex bg-slate-100 dark:bg-slate-950/80 p-1 rounded-lg self-start sm:self-auto">
+                    {LOG_DURATIONS.map((duration) => (
+                      <button
+                        key={duration.id}
+                        onClick={() => setLogDuration(duration.id)}
+                        className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center ${
+                          logDuration === duration.id
+                            ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm'
+                            : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                        }`}
+                      >
+                        {duration.id}
+                        <span className="hidden sm:inline ml-1 opacity-60 font-normal">- {duration.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {showLog && (
+                <DataLog
+                  data={hourlyData.length > 0 ? hourlyData : dailyData}
+                  durationId={logDuration}
+                  currency={selectedCurrency}
+                />
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>
