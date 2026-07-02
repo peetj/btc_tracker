@@ -1,12 +1,14 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { TrendingUp, TrendingDown, Sun, Moon, RefreshCw, AlertTriangle, Database, Wifi, FileText, Plus } from 'lucide-react';
+import btcUsdCsvUrl from '../data/btcusd_1-min_data.csv?url';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const HISTORY_START_TIMESTAMP = Date.UTC(2012, 0, 1);
 const HOURLY_HISTORY_DAYS = 30;
 const HOURLY_REFRESH_WINDOW_MS = 2 * ONE_HOUR_MS;
+const COINBASE_MAX_CANDLES_PER_REQUEST = 300;
 const DEFAULT_PINNED_CURRENCIES = ['usd', 'aud'];
 const SUPPORTED_CURRENCIES_TTL_MS = 7 * ONE_DAY_MS;
 
@@ -59,6 +61,7 @@ const MONTHLY_VISUAL_THEMES = [
 ];
 
 const normalizeCurrencyCode = (value) => value.trim().toLowerCase();
+const joinErrorMessages = (...messages) => messages.filter(Boolean).join(' | ') || null;
 
 const uniqueCurrencies = (currencies) => Array.from(new Set(
   [...DEFAULT_PINNED_CURRENCIES, ...currencies.map(normalizeCurrencyCode)]
@@ -496,12 +499,44 @@ class CryptoService {
       .sort((a, b) => a.timestamp - b.timestamp);
   }
 
+  static buildPriceSeriesFromCandles(candles, granularity) {
+    return candles
+      .filter((entry) => Array.isArray(entry) && entry.length >= 6)
+      .map(([time, low, high, open, close, volume]) => {
+        const rawTimestamp = Number(time) * 1000;
+        const key = granularity === 'hour'
+          ? toUtcHourTimestamp(rawTimestamp)
+          : toUtcDayTimestamp(rawTimestamp);
+
+        return {
+          timestamp: key,
+          open: Number(open),
+          high: Number(high),
+          low: Number(low),
+          close: Number(close),
+          volume: Number(volume) || 0
+        };
+      })
+      .filter((point) => (
+        Number.isFinite(point.timestamp) &&
+        Number.isFinite(point.open) &&
+        Number.isFinite(point.high) &&
+        Number.isFinite(point.low) &&
+        Number.isFinite(point.close)
+      ))
+      .sort((a, b) => a.timestamp - b.timestamp);
+  }
+
   static async loadUsdCSVData() {
     if (this.usdCsvData) return this.usdCsvData;
     if (this.csvLoadingPromise) return this.csvLoadingPromise;
 
     this.csvLoadingPromise = (async () => {
-      const response = await fetch('/data/btcusd_1-min_data.csv');
+      const response = await fetch(btcUsdCsvUrl, { cache: 'force-cache' });
+      if (!response.ok) {
+        throw new Error(`Bundled BTC CSV error: ${response.status}`);
+      }
+
       const text = await response.text();
       const lines = text.split('\n');
       const dailyData = new Map();
@@ -535,11 +570,20 @@ class CryptoService {
         }
       }
 
-      this.usdCsvData = Array.from(dailyData.values()).sort((a, b) => a.timestamp - b.timestamp);
-      return this.usdCsvData;
+      const parsedData = Array.from(dailyData.values()).sort((a, b) => a.timestamp - b.timestamp);
+      if (parsedData.length === 0) {
+        throw new Error('Bundled BTC CSV returned no usable rows');
+      }
+
+      return parsedData;
     })();
 
-    return this.csvLoadingPromise;
+    try {
+      this.usdCsvData = await this.csvLoadingPromise;
+      return this.usdCsvData;
+    } finally {
+      this.csvLoadingPromise = null;
+    }
   }
 
   static async fetchSupportedCurrencies() {
@@ -569,7 +613,6 @@ class CryptoService {
         .filter(Boolean)
         .sort();
 
-      this.supportedCurrencies = codes;
       localStorage.setItem(
         STORAGE_KEYS.supportedCurrencies,
         JSON.stringify({ codes, fetchedAt: Date.now() })
@@ -578,35 +621,81 @@ class CryptoService {
       return codes;
     })();
 
-    return this.supportedCurrenciesPromise;
+    try {
+      this.supportedCurrencies = await this.supportedCurrenciesPromise;
+      return this.supportedCurrencies;
+    } finally {
+      this.supportedCurrenciesPromise = null;
+    }
   }
 
   static async fetchUsdDailyHistoryFromAPI(fromTimestamp, toTimestamp) {
-    const from = Math.floor(fromTimestamp / 1000);
-    const to = Math.floor(toTimestamp / 1000);
-    const response = await fetch(
-      `https://api.coingecko.com/api/v3/coins/bitcoin/market_chart/range?vs_currency=usd&from=${from}&to=${to}&interval=daily`
-    );
+    try {
+      const from = Math.floor(fromTimestamp / 1000);
+      const to = Math.floor(toTimestamp / 1000);
+      const response = await fetch(
+        `https://api.coingecko.com/api/v3/coins/bitcoin/market_chart/range?vs_currency=usd&from=${from}&to=${to}&interval=daily`
+      );
 
-    if (!response.ok) {
-      throw new Error(`BTC daily API error: ${response.status}`);
+      if (!response.ok) {
+        throw new Error(`BTC daily API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return this.buildPriceSeriesFromPrices(data.prices || [], 'day');
+    } catch {
+      return this.fetchUsdCandlesFromCoinbase(fromTimestamp, toTimestamp, ONE_DAY_MS, 'day');
     }
-
-    const data = await response.json();
-    return this.buildPriceSeriesFromPrices(data.prices || [], 'day');
   }
 
   static async fetchUsdRecentHourlyDataFromAPI() {
-    const response = await fetch(
-      `https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=${HOURLY_HISTORY_DAYS}&interval=hourly`
-    );
+    try {
+      const response = await fetch(
+        `https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=${HOURLY_HISTORY_DAYS}&interval=hourly`
+      );
 
-    if (!response.ok) {
-      throw new Error(`BTC hourly API error: ${response.status}`);
+      if (!response.ok) {
+        throw new Error(`BTC hourly API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return this.buildPriceSeriesFromPrices(data.prices || [], 'hour');
+    } catch {
+      const endTimestamp = Date.now();
+      const startTimestamp = endTimestamp - (HOURLY_HISTORY_DAYS * ONE_DAY_MS);
+      return this.fetchUsdCandlesFromCoinbase(startTimestamp, endTimestamp, ONE_HOUR_MS, 'hour');
+    }
+  }
+
+  static async fetchUsdCandlesFromCoinbase(fromTimestamp, toTimestamp, granularityMs, granularityLabel) {
+    const candles = [];
+    const granularitySeconds = Math.floor(granularityMs / 1000);
+    const chunkSpanMs = (COINBASE_MAX_CANDLES_PER_REQUEST - 1) * granularityMs;
+    let cursor = granularityLabel === 'day'
+      ? toUtcDayTimestamp(fromTimestamp)
+      : toUtcHourTimestamp(fromTimestamp);
+    const finalTimestamp = granularityLabel === 'day'
+      ? toUtcDayTimestamp(toTimestamp)
+      : toUtcHourTimestamp(toTimestamp);
+
+    while (cursor <= finalTimestamp) {
+      const chunkEnd = Math.min(finalTimestamp, cursor + chunkSpanMs);
+      const startIso = new Date(cursor).toISOString();
+      const endIso = new Date(chunkEnd).toISOString();
+      const response = await fetch(
+        `https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=${granularitySeconds}&start=${encodeURIComponent(startIso)}&end=${encodeURIComponent(endIso)}`
+      );
+
+      if (!response.ok) {
+        throw new Error(`BTC ${granularityLabel} fallback API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      candles.push(...(Array.isArray(data) ? data : []));
+      cursor = chunkEnd + granularityMs;
     }
 
-    const data = await response.json();
-    return this.buildPriceSeriesFromPrices(data.prices || [], 'hour');
+    return this.buildPriceSeriesFromCandles(candles, granularityLabel);
   }
 
   static async fetchFxRatesFromAPI(currency, fromTimestamp, toTimestamp) {
@@ -625,7 +714,15 @@ class CryptoService {
   }
 
   static async loadUsdDailySeries() {
-    const csvData = await this.loadUsdCSVData();
+    let csvData = [];
+    let csvError = null;
+
+    try {
+      csvData = await this.loadUsdCSVData();
+    } catch (error) {
+      csvError = error instanceof Error ? error.message : 'Bundled BTC CSV unavailable';
+    }
+
     const cachedData = await BTCDatabase.getPoints('usd', 'day');
     let mergedData = mergeSeriesByTimestamp(csvData, cachedData);
 
@@ -636,7 +733,11 @@ class CryptoService {
       : (HISTORY_START_TIMESTAMP - ONE_DAY_MS);
     let missingDays = Math.max(0, Math.floor((lastClosedUtcDay - lastTimestamp) / ONE_DAY_MS));
     let source = cachedData.length > 0 ? 'CSV_AND_CACHE' : 'CSV_ONLY';
-    let error = null;
+    const loadErrors = [];
+
+    if (csvError && mergedData.length === 0) {
+      loadErrors.push(csvError);
+    }
 
     if (missingDays > 0) {
       try {
@@ -647,7 +748,7 @@ class CryptoService {
           source = 'LIVE_API';
         }
       } catch (fetchError) {
-        error = fetchError.message;
+        loadErrors.push(fetchError instanceof Error ? fetchError.message : 'BTC daily refresh failed');
         source = mergedData.length > 0 ? source : 'ERROR';
       }
     }
@@ -660,7 +761,7 @@ class CryptoService {
     return {
       data: mergedData,
       source,
-      error,
+      error: mergedData.length > 0 ? null : joinErrorMessages(...loadErrors),
       missingDays
     };
   }
@@ -684,7 +785,9 @@ class CryptoService {
           source = 'LIVE_API';
         }
       } catch (fetchError) {
-        error = fetchError.message;
+        error = recentData.length > 0
+          ? null
+          : (fetchError instanceof Error ? fetchError.message : 'BTC hourly refresh failed');
         source = recentData.length > 0 ? 'CACHE_ONLY' : 'ERROR';
       }
     }
@@ -728,7 +831,9 @@ class CryptoService {
           source = 'LIVE_API';
         }
       } catch (fetchError) {
-        error = fetchError.message;
+        error = mergedRates.length > 0
+          ? null
+          : (fetchError instanceof Error ? fetchError.message : 'FX refresh failed');
         source = mergedRates.length > 0 ? 'CACHE_ONLY' : 'ERROR';
       }
     }
@@ -822,14 +927,14 @@ const CurrencyControls = ({
         </p>
       </div>
 
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3 min-w-0">
+      <div className="flex flex-col gap-3 min-w-0 sm:flex-row sm:items-center">
         <div className="min-w-0 max-w-full overflow-x-auto whitespace-nowrap pb-1 soft-scrollbar-x">
           <div className="flex flex-nowrap gap-2">
             {pinnedCurrencies.map((currency) => (
               <button
                 key={currency}
                 onClick={() => onCurrencyChange(currency)}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors shrink-0 ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors shrink-0 ${
                   selectedCurrency === currency
                     ? 'bg-orange-500 text-white'
                     : 'bg-slate-100 dark:bg-slate-950/80 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800'
@@ -847,14 +952,15 @@ const CurrencyControls = ({
             value={pendingCurrency}
             onChange={(event) => onPendingCurrencyChange(event.target.value)}
             placeholder="Add fiat"
-            className="w-28 px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950/80 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-400"
+            className="w-28 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-orange-400 dark:border-slate-800 dark:bg-slate-950/80 dark:text-slate-200"
           />
           <button
             onClick={onAddCurrency}
-            className="px-3 py-2 bg-slate-900 dark:bg-orange-500 text-white rounded-lg text-sm font-medium hover:bg-slate-700 dark:hover:bg-orange-600 transition-colors flex items-center gap-1.5"
+            className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-700 dark:bg-orange-500 dark:hover:bg-orange-600"
+            aria-label="Add currency"
           >
             <Plus size={14} />
-            Add
+            <span className="ml-1.5">Add</span>
           </button>
           <datalist id="supported-currency-codes">
             {supportedCurrencies.map((currency) => (
@@ -947,7 +1053,7 @@ const PriceCard = ({
 }) => {
   if (loading && !currentData) {
     return (
-      <div className="bg-white theme-panel rounded-2xl p-6 shadow-xl transition-all duration-300 border border-slate-100 dark:border-slate-700">
+      <div className="bg-white theme-panel rounded-2xl border border-slate-100 p-6 shadow-xl transition-all duration-300 dark:border-slate-700">
         <div className="flex flex-col items-center justify-center py-8 space-y-4">
           <div className="relative">
             <div className="w-20 h-20 border-4 border-slate-200 dark:border-slate-700 rounded-full"></div>
@@ -972,7 +1078,7 @@ const PriceCard = ({
 
   return (
     <div
-      className="relative overflow-hidden bg-white theme-panel hero-panel rounded-[30px] p-6 lg:p-7 shadow-xl transition-all duration-300 border border-slate-200/60 dark:border-slate-800/80"
+      className="relative overflow-hidden rounded-[30px] border border-slate-200/60 bg-white theme-panel hero-panel p-6 shadow-xl transition-all duration-300 dark:border-slate-800/80 lg:p-7"
       style={{
         backgroundImage: `linear-gradient(120deg, rgba(255,255,255,0.98) 0%, rgba(255,255,255,0.93) 48%, transparent 100%), radial-gradient(circle at 78% 24%, ${visualTheme.accent}22, transparent 24%), radial-gradient(circle at 88% 84%, ${visualTheme.orbit}18, transparent 22%)`
       }}
@@ -1030,7 +1136,7 @@ const PriceCard = ({
           <div className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
             Spot price
           </div>
-          <div className="mt-4 text-5xl sm:text-6xl lg:text-7xl font-black text-slate-950 dark:text-slate-50 tracking-[-0.04em] leading-none">
+          <div className="mt-4 max-w-full overflow-hidden text-[clamp(2.8rem,7vw,5.6rem)] font-black text-slate-950 dark:text-slate-50 tracking-[-0.05em] leading-[0.92] break-words">
             {formatCurrency(price, currency)}
           </div>
           <div className={`mt-5 inline-flex items-center rounded-full px-3 py-1.5 ${isPositive ? 'bg-emerald-500/12 text-emerald-600 dark:text-emerald-300' : 'bg-rose-500/12 text-rose-600 dark:text-rose-300'} font-semibold`}>
@@ -1081,27 +1187,25 @@ const MarketStatsStrip = ({ performanceStats, stats24h, currency, loading }) => 
   ];
 
   return (
-    <div className="mt-6 bg-white theme-panel rounded-2xl p-4 shadow-xl border border-slate-100 dark:border-slate-700">
-      <div className="overflow-x-auto pb-1 soft-scrollbar-x">
-        <div className="grid grid-flow-col auto-cols-[minmax(132px,1fr)] gap-3 min-w-max">
-          {summaryCards.map((card) => (
-            <div
-              key={card.id}
-              className="rounded-2xl bg-slate-50 dark:bg-slate-900/60 theme-subpanel px-4 py-3 border border-slate-100 dark:border-slate-700"
-            >
-              <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{card.label}</div>
-              <div className={`mt-2 text-sm font-semibold ${
-                card.tone === 'positive'
-                  ? 'text-emerald-500'
-                  : card.tone === 'negative'
-                    ? 'text-rose-500'
-                    : 'text-slate-700 dark:text-slate-200'
-              }`}>
-                {loading ? '...' : card.value}
-              </div>
+    <div className="mt-6 rounded-2xl border border-slate-100 bg-white theme-panel p-4 shadow-xl dark:border-slate-700">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 2xl:grid-cols-6">
+        {summaryCards.map((card) => (
+          <div
+            key={card.id}
+            className="rounded-2xl bg-slate-50 dark:bg-slate-900/60 theme-subpanel px-4 py-3 border border-slate-100 dark:border-slate-700"
+          >
+            <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{card.label}</div>
+            <div className={`mt-2 text-sm font-semibold ${
+              card.tone === 'positive'
+                ? 'text-emerald-500'
+                : card.tone === 'negative'
+                  ? 'text-rose-500'
+                  : 'text-slate-700 dark:text-slate-200'
+            }`}>
+              {loading ? '...' : card.value}
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -1218,7 +1322,7 @@ const ChartSection = ({ data, range, setRange, loading, currency, dataModeLabel 
     : 0;
 
   return (
-    <div className="bg-white theme-panel rounded-2xl p-6 shadow-xl border border-slate-100 dark:border-slate-700 mt-6">
+    <div className="mt-6 rounded-2xl border border-slate-100 bg-white theme-panel p-6 shadow-xl dark:border-slate-700">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
         <div>
           <h3 className="text-lg font-semibold text-slate-800 dark:text-white">Price History</h3>
@@ -1253,7 +1357,7 @@ const ChartSection = ({ data, range, setRange, loading, currency, dataModeLabel 
         </div>
       </div>
 
-      <div className="h-[300px] w-full relative">
+      <div className="relative h-[300px] w-full">
         {loading ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-50/50 dark:bg-slate-900/50 theme-overlay-surface rounded-lg">
             <div className="flex flex-col items-center space-y-4">
@@ -1592,13 +1696,19 @@ const BitcoinTracker = () => {
   const stats24h = useMemo(() => buildRollingWindowStats(latestSeries, currentData), [latestSeries, currentData]);
   const performanceStats = useMemo(() => buildPerformanceStats(latestSeries, currentData), [latestSeries, currentData]);
   const blockingLoad = loading || (currencyLoading && selectedCurrency !== activeFxCurrency);
+  const showBlockingFetchError = Boolean(fetchStatus.error) && !currentData && chartData.length === 0;
 
   return (
-    <div className={`min-h-screen theme-shell transition-colors duration-300 ${isDarkMode ? 'bg-slate-950 text-slate-200' : 'bg-slate-50 text-slate-800'}`}>
+    <div className={`min-h-screen overflow-x-hidden theme-shell transition-colors duration-300 ${isDarkMode ? 'bg-slate-950 text-slate-200' : 'bg-slate-50 text-slate-800'}`}>
       <div className="max-w-5xl mx-auto px-4 py-8">
         <div className="flex justify-between items-center mb-8">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Nexgen Bitcoin Price Graph</h1>
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-2xl font-bold tracking-tight">Nexgen Bitcoin Price Graph</h1>
+              <span className="inline-flex items-center rounded-full border border-amber-300/80 bg-amber-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/12 dark:text-amber-200">
+                Preview
+              </span>
+            </div>
             <p className="text-sm text-slate-500 dark:text-slate-400">Bitcoin history with hourly zoom and fiat conversion</p>
           </div>
           <div className="flex items-center space-x-3">
@@ -1619,7 +1729,7 @@ const BitcoinTracker = () => {
           onAddCurrency={handleAddCurrency}
         />
 
-        {fetchStatus.error && (
+        {showBlockingFetchError && (
           <div className="mb-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-900/50 rounded-xl p-4 flex items-start">
             <AlertTriangle className="text-red-500 shrink-0 mt-0.5 mr-3" size={20} />
             <div>

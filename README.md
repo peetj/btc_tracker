@@ -1,47 +1,46 @@
 # Bitcoin Price Tracker
 
-A comprehensive Bitcoin price tracking application with historical data from 2012 to present, featuring live data updates and beautiful visualizations.
+A web-based Bitcoin price tracker with historical data from 2012 onward, hourly zoom, fiat conversion, and persistent local caching.
 
 ## Features
 
 - 📊 **Historical Data**: Complete Bitcoin price data from January 1, 2012
-- 🔴 **Live Updates**: Automatic gap-filling with real-time data from CoinGecko API
+- 🔴 **Live Updates**: Automatic backfill using CoinGecko with Coinbase fallback
 - 📈 **Interactive Charts**: Multiple time ranges (1D, 1W, 1M, 6M, 1Y, 5Y, ALL)
-- 🔄 **Smart Gap Detection**: Automatically identifies missing data and allows manual fetching
+- 💱 **Fiat Conversion**: Switch between USD, AUD, and additional supported fiat currencies
 - 🌓 **Dark/Light Mode**: Toggle between themes
-- 📱 **PWA Support**: Install as a desktop/mobile app
-- 💾 **IndexedDB Storage**: Persistent browser database for daily price data
+- 📱 **PWA Support**: Optional browser install for desktop/mobile use
+- 💾 **IndexedDB Storage**: Persistent browser database for price and FX cache
 - 🗄️ **Smart Caching**: Automatic data persistence across sessions
 - 🔍 **Raw Data Inspector**: View detailed price logs with customizable time windows
 
 ## Data Architecture
 
-### Dual Data Source System
-1. **CSV Archive** (`data/btcusd_1-min_data.csv`):
-   - Historical data from 2012-01-01 to mid-2025
-   - Minute-level OHLC (Open, High, Low, Close) data
-   - ~7.2M records, aggregated to daily on load for performance
+### Source Layers
+1. **Bundled CSV Archive** (`data/btcusd_1-min_data.csv`)
+   - Minute-level BTC/USD archive starting on 2012-01-01
+   - Aggregated to daily candles on load for fast rendering
 
-2. **Live API Integration** (CoinGecko):
-   - Automatically detects gaps between CSV end date and current date
-   - Fetches **daily OHLC prices** using CoinGecko market_chart API
-   - Manual "Update Missing Data" button when gaps detected
-   - **Stored in IndexedDB** for persistent browser-side storage
+2. **Live USD Price Refresh**
+   - Daily backfill extends the archive from its cutoff date to today
+   - Recent hourly BTC/USD history is fetched for the short-range views
+   - CoinGecko is attempted first, with Coinbase candle data as fallback
+
+3. **Daily FX Conversion**
+   - Non-USD views are converted from cached BTC/USD data
+   - USD-to-fiat daily FX rates are fetched from Frankfurter and stored locally
 
 ### How It Works
-1. **Initial Load**: CSV file is loaded and aggregated to daily data
-2. **Check IndexedDB**: Looks for previously fetched daily data in browser database
-3. **Gap Detection**: Calculates days missing between last data point and today
-4. **Auto-Fetch on Load**: Automatically attempts to fetch missing data on startup
-5. **Manual Fetch Option**: Button appears when data gaps detected, showing number of missing days
-6. **Data Storage**: New daily prices saved to IndexedDB (persistent)
-7. **Merge & Display**: CSV + IndexedDB data merged and displayed
-8. **Status Indicators**: Clear badges showing data freshness (Up to Date, X days Behind, etc.)
+1. Load the bundled CSV archive and aggregate it into daily BTC/USD candles.
+2. Merge any previously cached daily, hourly, and FX data from IndexedDB.
+3. Backfill missing USD history and refresh recent hourly data if the cache is stale.
+4. Convert USD price series into the selected fiat currency using cached daily FX rates.
+5. Render the hero card, performance strip, chart, and raw-data inspector from the merged cache.
 
 ### IndexedDB Storage
 - **Database**: `btc_price_db`
-- **Store**: `daily_prices`
-- **Key**: timestamp (unique)
+- **Store**: `price_points`
+- **Key**: `currency:granularity:timestamp`
 - **Persistence**: Survives browser restarts
 - **Capacity**: Much larger than localStorage (~50MB+)
 
@@ -51,42 +50,25 @@ Bitcoin trades 24/7, so we use **midnight UTC (00:00 UTC)** as the daily close:
 - Consistent with major exchanges and data providers
 - Aggregated from hourly/minute data to daily OHLC bars
 
-## Installation
+## Running Locally
 
 ```bash
 npm install
 npm run dev
 ```
 
-## 🚀 Windows Desktop Shortcut
-You can create a desktop shortcut to launch the application in two ways:
+Open `http://localhost:5173` in your browser.
 
-### Method 1: One-Click Dev Launcher (Recommended for Local Use)
-This method creates a script that automatically starts the dev server and opens your browser.
+## Production Build
 
-1. Create a new file named `start_tracker.bat` in the root of your project folder.
-2. Paste the following code into the file:
-
-```batch
-@echo off
-echo Starting Bitcoin Price Tracker...
-cd /d "%~dp0"
-start "" "http://localhost:5173"
-npm run dev
+```bash
+npm run build
+npm run preview
 ```
 
-3. Right-click `start_tracker.bat` -> Show more options -> Send to -> Desktop (create shortcut).
-4. You can now double-click the shortcut on your desktop to boot the app instantly.
+## Optional Browser Install (PWA)
 
-*(Note: You can change the icon of the shortcut by Right-Clicking the shortcut -> Properties -> Change Icon).*
-
-### Method 2: Install as Native App (PWA)
-Once the server is running (via `npm run dev`):
-
-1. Open the app in Chrome or Edge (http://localhost:5173).
-2. Look for the Install icon (computer with down arrow) on the right side of the address bar.
-3. Click Install.
-4. This will create a standalone application window and automatically place a Bitcoin Price Tracker icon on your desktop and Start menu.
+When the app is served over a browser that supports PWA install prompts, you can install it from the address bar menu for a standalone app-like window.
 
 ## Tech Stack
 
@@ -95,18 +77,19 @@ Once the server is running (via `npm run dev`):
 - Recharts (charts)
 - Lucide React (icons)
 - PWA (Progressive Web App)
-- CoinGecko API (live data)
+- CoinGecko + Coinbase fallback (market data)
+- Frankfurter (FX rates)
 - IndexedDB (data persistence)
 
 ## Development
 
 The app automatically handles:
 - CSV data loading and daily aggregation (for memory efficiency)
-- Live data fetching and merging from CoinGecko API
+- Live data fetching and merging with fallback providers
 - IndexedDB storage management for fetched data
 - Data aggregation for different time ranges (hour, day, week, month)
-- Intelligent gap detection and status reporting
-- Manual and automatic data updates
+- Automatic fiat conversion from cached USD history
+- Automatic refresh and cache reuse
 
 ### Browser Console Commands
 
@@ -115,9 +98,6 @@ Open browser console (F12) and use:
 ```javascript
 // View IndexedDB statistics
 await BTCDatabase.getDataStats()
-
-// View all stored daily prices
-await BTCDatabase.getAllDailyPrices()
 
 // Clear all IndexedDB data
 await BTCDatabase.clearAllData()
