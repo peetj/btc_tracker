@@ -31,3 +31,4 @@ dist-ssr
 
 
 data/btcusd_1-min_data.csv
+public/local-data/btcusd_1-min_data.csv

@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { TrendingUp, TrendingDown, Sun, Moon, RefreshCw, AlertTriangle, Database, Wifi, FileText, Plus } from 'lucide-react';
-import btcUsdCsvUrl from '../data/btcusd_1-min_data.csv?url';
+import btcUsdDailyCsvUrl from '../data/btcusd_daily_data.csv?url';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -11,6 +11,10 @@ const HOURLY_REFRESH_WINDOW_MS = 2 * ONE_HOUR_MS;
 const COINBASE_MAX_CANDLES_PER_REQUEST = 300;
 const DEFAULT_PINNED_CURRENCIES = ['usd', 'aud'];
 const SUPPORTED_CURRENCIES_TTL_MS = 7 * ONE_DAY_MS;
+const ARCHIVE_MODE_STORAGE_KEY = 'btc_tracker_archive_mode_v1';
+const BUNDLED_DAILY_ARCHIVE_MODE = 'bundled-daily';
+const LOCAL_MINUTE_ARCHIVE_MODE = 'local-minute';
+const LOCAL_MINUTE_ARCHIVE_URL = `${import.meta.env.BASE_URL}local-data/btcusd_1-min_data.csv`;
 
 const STORAGE_KEYS = {
   pinnedCurrencies: 'btc_tracker_pinned_currencies',
@@ -83,6 +87,26 @@ const readPinnedCurrencies = () => {
 
 const savePinnedCurrencies = (currencies) => {
   localStorage.setItem(STORAGE_KEYS.pinnedCurrencies, JSON.stringify(uniqueCurrencies(currencies)));
+};
+
+const readArchiveMode = () => {
+  if (typeof window === 'undefined') return BUNDLED_DAILY_ARCHIVE_MODE;
+
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const requestedMode = params.get('archive');
+
+    if (requestedMode === LOCAL_MINUTE_ARCHIVE_MODE || requestedMode === BUNDLED_DAILY_ARCHIVE_MODE) {
+      localStorage.setItem(ARCHIVE_MODE_STORAGE_KEY, requestedMode);
+      return requestedMode;
+    }
+
+    return localStorage.getItem(ARCHIVE_MODE_STORAGE_KEY) === LOCAL_MINUTE_ARCHIVE_MODE
+      ? LOCAL_MINUTE_ARCHIVE_MODE
+      : BUNDLED_DAILY_ARCHIVE_MODE;
+  } catch {
+    return BUNDLED_DAILY_ARCHIVE_MODE;
+  }
 };
 
 const toUtcDayTimestamp = (timestamp) => {
@@ -479,6 +503,7 @@ window.BTCDatabase = BTCDatabase;
 class CryptoService {
   static usdCsvData = null;
   static csvLoadingPromise = null;
+  static usdCsvMode = null;
   static supportedCurrencies = null;
   static supportedCurrenciesPromise = null;
 
@@ -575,55 +600,107 @@ class CryptoService {
       .sort((a, b) => a.timestamp - b.timestamp);
   }
 
+  static parseDailyCsv(text) {
+    return text
+      .split('\n')
+      .slice(1)
+      .filter((line) => line.trim())
+      .map((line) => line.split(',').map((value) => parseFloat(value)))
+      .filter((row) => row.length >= 6 && Number.isFinite(row[0]))
+      .map(([rawTimestamp, open, high, low, close, volume]) => ({
+        timestamp: toUtcDayTimestamp(rawTimestamp * 1000),
+        open,
+        high,
+        low,
+        close,
+        volume
+      }))
+      .sort((a, b) => a.timestamp - b.timestamp);
+  }
+
+  static parseMinuteCsvToDaily(text) {
+    const lines = text.split('\n');
+    const dailyData = new Map();
+
+    for (let index = 1; index < lines.length; index += 1) {
+      if (!lines[index].trim()) continue;
+
+      const [rawTimestamp, rawOpen, rawHigh, rawLow, rawClose, rawVolume] = lines[index]
+        .split(',')
+        .map((value) => parseFloat(value));
+
+      if (Number.isNaN(rawTimestamp)) continue;
+
+      const dayKey = toUtcDayTimestamp(rawTimestamp * 1000);
+
+      if (!dailyData.has(dayKey)) {
+        dailyData.set(dayKey, {
+          timestamp: dayKey,
+          open: rawOpen,
+          high: rawHigh,
+          low: rawLow,
+          close: rawClose,
+          volume: rawVolume
+        });
+      } else {
+        const point = dailyData.get(dayKey);
+        point.high = Math.max(point.high, rawHigh);
+        point.low = Math.min(point.low, rawLow);
+        point.close = rawClose;
+        point.volume += rawVolume;
+      }
+    }
+
+    return Array.from(dailyData.values()).sort((a, b) => a.timestamp - b.timestamp);
+  }
+
+  static async fetchCsvText(url, cacheMode, errorLabel) {
+    const response = await fetch(url, { cache: cacheMode });
+    if (!response.ok) {
+      throw new Error(`${errorLabel}: ${response.status}`);
+    }
+
+    return response.text();
+  }
+
   static async loadUsdCSVData() {
-    if (this.usdCsvData) return this.usdCsvData;
-    if (this.csvLoadingPromise) return this.csvLoadingPromise;
+    const archiveMode = readArchiveMode();
+
+    if (this.usdCsvData && this.usdCsvMode === archiveMode) return this.usdCsvData;
+    if (this.csvLoadingPromise && this.usdCsvMode === archiveMode) return this.csvLoadingPromise;
+
+    this.usdCsvMode = archiveMode;
 
     this.csvLoadingPromise = (async () => {
-      const response = await fetch(btcUsdCsvUrl, { cache: 'force-cache' });
-      if (!response.ok) {
-        throw new Error(`Bundled BTC CSV error: ${response.status}`);
-      }
+      if (archiveMode === LOCAL_MINUTE_ARCHIVE_MODE) {
+        try {
+          const localMinuteCsv = await this.fetchCsvText(
+            LOCAL_MINUTE_ARCHIVE_URL,
+            'no-store',
+            'Local minute BTC CSV error'
+          );
+          const parsedLocalData = this.parseMinuteCsvToDaily(localMinuteCsv);
 
-      const text = await response.text();
-      const lines = text.split('\n');
-      const dailyData = new Map();
-
-      for (let index = 1; index < lines.length; index += 1) {
-        if (!lines[index].trim()) continue;
-
-        const [rawTimestamp, rawOpen, rawHigh, rawLow, rawClose, rawVolume] = lines[index]
-          .split(',')
-          .map((value) => parseFloat(value));
-
-        if (Number.isNaN(rawTimestamp)) continue;
-
-        const dayKey = toUtcDayTimestamp(rawTimestamp * 1000);
-
-        if (!dailyData.has(dayKey)) {
-          dailyData.set(dayKey, {
-            timestamp: dayKey,
-            open: rawOpen,
-            high: rawHigh,
-            low: rawLow,
-            close: rawClose,
-            volume: rawVolume
-          });
-        } else {
-          const point = dailyData.get(dayKey);
-          point.high = Math.max(point.high, rawHigh);
-          point.low = Math.min(point.low, rawLow);
-          point.close = rawClose;
-          point.volume += rawVolume;
+          if (parsedLocalData.length > 0) {
+            return parsedLocalData;
+          }
+        } catch {
+          // Fall through to the bundled daily archive for public or incomplete local setups.
         }
       }
 
-      const parsedData = Array.from(dailyData.values()).sort((a, b) => a.timestamp - b.timestamp);
-      if (parsedData.length === 0) {
-        throw new Error('Bundled BTC CSV returned no usable rows');
+      const bundledDailyCsv = await this.fetchCsvText(
+        btcUsdDailyCsvUrl,
+        'force-cache',
+        'Bundled BTC daily CSV error'
+      );
+      const parsedDailyData = this.parseDailyCsv(bundledDailyCsv);
+
+      if (parsedDailyData.length === 0) {
+        throw new Error('Bundled BTC daily CSV returned no usable rows');
       }
 
-      return parsedData;
+      return parsedDailyData;
     })();
 
     try {
