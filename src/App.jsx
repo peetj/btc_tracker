@@ -130,6 +130,22 @@ const formatCurrency = (value, currency) => {
   }
 };
 
+const formatWholeCurrency = (value, currency) => {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return '-';
+
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currency.toUpperCase(),
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    }).format(numericValue);
+  } catch {
+    return `${currency.toUpperCase()} ${Math.round(numericValue)}`;
+  }
+};
+
 const formatAxisCurrency = (value, currency) => {
   const numericValue = Number(value);
   if (!Number.isFinite(numericValue)) return '-';
@@ -241,6 +257,38 @@ const buildPerformanceStats = (data, currentPoint) => {
       change: ((currentPoint.close - anchorPoint.close) / anchorPoint.close) * 100
     };
   });
+};
+
+const buildMeanAnnualGrowth = (data, currentPoint) => {
+  if (!currentPoint || data.length < 2) return null;
+
+  const yearlyReturns = [];
+  const yearlyWindowMs = 365.25 * ONE_DAY_MS;
+  let intervalStart = data[0].timestamp;
+  let intervalEnd = intervalStart + yearlyWindowMs;
+
+  while (intervalEnd <= currentPoint.timestamp) {
+    const startPoint = findClosestPointAtOrBefore(data, intervalStart);
+    const endPoint = findClosestPointAtOrBefore(data, intervalEnd);
+
+    if (
+      startPoint &&
+      endPoint &&
+      Number.isFinite(startPoint.close) &&
+      Number.isFinite(endPoint.close) &&
+      startPoint.close > 0 &&
+      endPoint.timestamp > startPoint.timestamp
+    ) {
+      yearlyReturns.push(((endPoint.close - startPoint.close) / startPoint.close) * 100);
+    }
+
+    intervalStart = intervalEnd;
+    intervalEnd += yearlyWindowMs;
+  }
+
+  if (yearlyReturns.length === 0) return null;
+
+  return yearlyReturns.reduce((total, value) => total + value, 0) / yearlyReturns.length;
 };
 
 const convertSeriesToCurrency = (series, currency, fxRates) => {
@@ -1137,7 +1185,7 @@ const PriceCard = ({
             Spot price
           </div>
           <div className="mt-4 max-w-full overflow-hidden text-[clamp(2.8rem,7vw,5.6rem)] font-black text-slate-950 dark:text-slate-50 tracking-[-0.05em] leading-[0.92] break-words">
-            {formatCurrency(price, currency)}
+            {formatWholeCurrency(price, currency)}
           </div>
           <div className={`mt-5 inline-flex items-center rounded-full px-3 py-1.5 ${isPositive ? 'bg-emerald-500/12 text-emerald-600 dark:text-emerald-300' : 'bg-rose-500/12 text-rose-600 dark:text-rose-300'} font-semibold`}>
             {isPositive ? <TrendingUp size={18} className="mr-1.5" /> : <TrendingDown size={18} className="mr-1.5" />}
@@ -1164,7 +1212,7 @@ const PriceCard = ({
   );
 };
 
-const MarketStatsStrip = ({ performanceStats, stats24h, currency, loading }) => {
+const MarketStatsStrip = ({ performanceStats, stats24h, currency, loading, meanAnnualGrowth }) => {
   const summaryCards = [
     ...performanceStats.map((entry) => ({
       id: entry.id,
@@ -1183,6 +1231,12 @@ const MarketStatsStrip = ({ performanceStats, stats24h, currency, loading }) => 
       label: '24h low',
       value: stats24h.low ? formatCurrency(stats24h.low, currency) : '-',
       tone: 'neutral'
+    },
+    {
+      id: 'MEAN_ANNUAL_GROWTH',
+      label: 'Avg YoY since start',
+      value: meanAnnualGrowth === null ? '-' : `${meanAnnualGrowth >= 0 ? '+' : ''}${meanAnnualGrowth.toFixed(2)}%`,
+      tone: meanAnnualGrowth === null ? 'neutral' : (meanAnnualGrowth >= 0 ? 'positive' : 'negative')
     }
   ];
 
@@ -1695,6 +1749,7 @@ const BitcoinTracker = () => {
   const currentData = latestSeries.length > 0 ? latestSeries[latestSeries.length - 1] : null;
   const stats24h = useMemo(() => buildRollingWindowStats(latestSeries, currentData), [latestSeries, currentData]);
   const performanceStats = useMemo(() => buildPerformanceStats(latestSeries, currentData), [latestSeries, currentData]);
+  const meanAnnualGrowth = useMemo(() => buildMeanAnnualGrowth(latestSeries, currentData), [latestSeries, currentData]);
   const blockingLoad = loading || (currencyLoading && selectedCurrency !== activeFxCurrency);
   const showBlockingFetchError = Boolean(fetchStatus.error) && !currentData && chartData.length === 0;
 
@@ -1756,6 +1811,7 @@ const BitcoinTracker = () => {
           stats24h={stats24h}
           currency={selectedCurrency}
           loading={blockingLoad}
+          meanAnnualGrowth={meanAnnualGrowth}
         />
 
         <ChartSection
