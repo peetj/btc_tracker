@@ -17,9 +17,10 @@ A web-based Bitcoin price tracker with historical data from 2012 onward, hourly 
 ## Data Architecture
 
 ### Source Layers
-1. **Bundled CSV Archive** (`data/btcusd_1-min_data.csv`)
-   - Minute-level BTC/USD archive starting on 2012-01-01
-   - Aggregated to daily candles on load for fast rendering
+1. **Bundled Daily Archive** (`data/btcusd_daily_data.csv`)
+   - Checked-in daily BTC/USD archive starting on 2012-01-01
+   - Small enough for GitHub Pages deployment and fast first-load rendering
+   - Used by default in local, preview, and GitHub Pages builds
 
 2. **Live USD Price Refresh**
    - Daily backfill extends the archive from its cutoff date to today
@@ -31,11 +32,21 @@ A web-based Bitcoin price tracker with historical data from 2012 onward, hourly 
    - USD-to-fiat daily FX rates are fetched from Frankfurter and stored locally
 
 ### How It Works
-1. Load the bundled CSV archive and aggregate it into daily BTC/USD candles.
+1. Load the bundled daily BTC/USD archive.
 2. Merge any previously cached daily, hourly, and FX data from IndexedDB.
 3. Backfill missing USD history and refresh recent hourly data if the cache is stale.
 4. Convert USD price series into the selected fiat currency using cached daily FX rates.
 5. Render the hero card, performance strip, chart, and raw-data inspector from the merged cache.
+
+### Optional Local High-Resolution Mode
+
+If you want to use the full minute archive locally:
+
+1. Copy your local minute CSV to `public/local-data/btcusd_1-min_data.csv`
+2. Run `npm run dev`
+3. Open `http://localhost:5173/?archive=local-minute`
+
+If the local minute file is missing or incomplete, the app falls back to the bundled daily archive automatically.
 
 ### IndexedDB Storage
 - **Database**: `btc_price_db`
@@ -66,6 +77,14 @@ npm run build
 npm run preview
 ```
 
+## GitHub Pages
+
+The repository is configured to deploy from GitHub Actions to GitHub Pages using the bundled daily archive.
+
+- Public Pages builds default to the lightweight daily archive
+- The default visible chart range remains `1W`
+- Local minute resolution is still available through the optional manual mode above
+
 ## Optional Browser Install (PWA)
 
 When the app is served over a browser that supports PWA install prompts, you can install it from the address bar menu for a standalone app-like window.
@@ -84,7 +103,7 @@ When the app is served over a browser that supports PWA install prompts, you can
 ## Development
 
 The app automatically handles:
-- CSV data loading and daily aggregation (for memory efficiency)
+- Bundled daily archive loading plus optional local minute-archive fallback
 - Live data fetching and merging with fallback providers
 - IndexedDB storage management for fetched data
 - Data aggregation for different time ranges (hour, day, week, month)
@@ -123,7 +142,8 @@ await BTCDatabase.clearAllData()
 
 ## Notes
 
-- The CSV file contains ~7.2M records. The app aggregates them to daily data on load to optimize memory usage and chart performance.
+- The original local minute CSV contains ~7.2M records.
+- The checked-in archive is the pre-aggregated daily version of that larger local minute dataset.
 - CoinGecko API has rate limits. The app automatically handles this and provides clear feedback.
 - IndexedDB data persists across browser sessions but is specific to each browser/profile.
 - For best results, open the app daily to keep data current, or use the manual fetch button when needed.

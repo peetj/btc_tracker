@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { TrendingUp, TrendingDown, Sun, Moon, RefreshCw, AlertTriangle, Database, Wifi, FileText, Plus } from 'lucide-react';
-import btcUsdCsvUrl from '../data/btcusd_1-min_data.csv?url';
+import btcUsdDailyCsvUrl from '../data/btcusd_daily_data.csv?url';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -11,6 +11,10 @@ const HOURLY_REFRESH_WINDOW_MS = 2 * ONE_HOUR_MS;
 const COINBASE_MAX_CANDLES_PER_REQUEST = 300;
 const DEFAULT_PINNED_CURRENCIES = ['usd', 'aud'];
 const SUPPORTED_CURRENCIES_TTL_MS = 7 * ONE_DAY_MS;
+const ARCHIVE_MODE_STORAGE_KEY = 'btc_tracker_archive_mode_v1';
+const BUNDLED_DAILY_ARCHIVE_MODE = 'bundled-daily';
+const LOCAL_MINUTE_ARCHIVE_MODE = 'local-minute';
+const LOCAL_MINUTE_ARCHIVE_URL = `${import.meta.env.BASE_URL}local-data/btcusd_1-min_data.csv`;
 
 const STORAGE_KEYS = {
   pinnedCurrencies: 'btc_tracker_pinned_currencies',
@@ -85,6 +89,26 @@ const savePinnedCurrencies = (currencies) => {
   localStorage.setItem(STORAGE_KEYS.pinnedCurrencies, JSON.stringify(uniqueCurrencies(currencies)));
 };
 
+const readArchiveMode = () => {
+  if (typeof window === 'undefined') return BUNDLED_DAILY_ARCHIVE_MODE;
+
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const requestedMode = params.get('archive');
+
+    if (requestedMode === LOCAL_MINUTE_ARCHIVE_MODE || requestedMode === BUNDLED_DAILY_ARCHIVE_MODE) {
+      localStorage.setItem(ARCHIVE_MODE_STORAGE_KEY, requestedMode);
+      return requestedMode;
+    }
+
+    return localStorage.getItem(ARCHIVE_MODE_STORAGE_KEY) === LOCAL_MINUTE_ARCHIVE_MODE
+      ? LOCAL_MINUTE_ARCHIVE_MODE
+      : BUNDLED_DAILY_ARCHIVE_MODE;
+  } catch {
+    return BUNDLED_DAILY_ARCHIVE_MODE;
+  }
+};
+
 const toUtcDayTimestamp = (timestamp) => {
   const date = new Date(timestamp);
   return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
@@ -127,6 +151,22 @@ const formatCurrency = (value, currency) => {
     }).format(numericValue);
   } catch {
     return `${currency.toUpperCase()} ${numericValue.toFixed(2)}`;
+  }
+};
+
+const formatWholeCurrency = (value, currency) => {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return '-';
+
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: currency.toUpperCase(),
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    }).format(numericValue);
+  } catch {
+    return `${currency.toUpperCase()} ${Math.round(numericValue)}`;
   }
 };
 
@@ -241,6 +281,38 @@ const buildPerformanceStats = (data, currentPoint) => {
       change: ((currentPoint.close - anchorPoint.close) / anchorPoint.close) * 100
     };
   });
+};
+
+const buildMeanAnnualGrowth = (data, currentPoint) => {
+  if (!currentPoint || data.length < 2) return null;
+
+  const yearlyReturns = [];
+  const yearlyWindowMs = 365.25 * ONE_DAY_MS;
+  let intervalStart = data[0].timestamp;
+  let intervalEnd = intervalStart + yearlyWindowMs;
+
+  while (intervalEnd <= currentPoint.timestamp) {
+    const startPoint = findClosestPointAtOrBefore(data, intervalStart);
+    const endPoint = findClosestPointAtOrBefore(data, intervalEnd);
+
+    if (
+      startPoint &&
+      endPoint &&
+      Number.isFinite(startPoint.close) &&
+      Number.isFinite(endPoint.close) &&
+      startPoint.close > 0 &&
+      endPoint.timestamp > startPoint.timestamp
+    ) {
+      yearlyReturns.push(((endPoint.close - startPoint.close) / startPoint.close) * 100);
+    }
+
+    intervalStart = intervalEnd;
+    intervalEnd += yearlyWindowMs;
+  }
+
+  if (yearlyReturns.length === 0) return null;
+
+  return yearlyReturns.reduce((total, value) => total + value, 0) / yearlyReturns.length;
 };
 
 const convertSeriesToCurrency = (series, currency, fxRates) => {
@@ -431,6 +503,7 @@ window.BTCDatabase = BTCDatabase;
 class CryptoService {
   static usdCsvData = null;
   static csvLoadingPromise = null;
+  static usdCsvMode = null;
   static supportedCurrencies = null;
   static supportedCurrenciesPromise = null;
 
@@ -527,55 +600,107 @@ class CryptoService {
       .sort((a, b) => a.timestamp - b.timestamp);
   }
 
+  static parseDailyCsv(text) {
+    return text
+      .split('\n')
+      .slice(1)
+      .filter((line) => line.trim())
+      .map((line) => line.split(',').map((value) => parseFloat(value)))
+      .filter((row) => row.length >= 6 && Number.isFinite(row[0]))
+      .map(([rawTimestamp, open, high, low, close, volume]) => ({
+        timestamp: toUtcDayTimestamp(rawTimestamp * 1000),
+        open,
+        high,
+        low,
+        close,
+        volume
+      }))
+      .sort((a, b) => a.timestamp - b.timestamp);
+  }
+
+  static parseMinuteCsvToDaily(text) {
+    const lines = text.split('\n');
+    const dailyData = new Map();
+
+    for (let index = 1; index < lines.length; index += 1) {
+      if (!lines[index].trim()) continue;
+
+      const [rawTimestamp, rawOpen, rawHigh, rawLow, rawClose, rawVolume] = lines[index]
+        .split(',')
+        .map((value) => parseFloat(value));
+
+      if (Number.isNaN(rawTimestamp)) continue;
+
+      const dayKey = toUtcDayTimestamp(rawTimestamp * 1000);
+
+      if (!dailyData.has(dayKey)) {
+        dailyData.set(dayKey, {
+          timestamp: dayKey,
+          open: rawOpen,
+          high: rawHigh,
+          low: rawLow,
+          close: rawClose,
+          volume: rawVolume
+        });
+      } else {
+        const point = dailyData.get(dayKey);
+        point.high = Math.max(point.high, rawHigh);
+        point.low = Math.min(point.low, rawLow);
+        point.close = rawClose;
+        point.volume += rawVolume;
+      }
+    }
+
+    return Array.from(dailyData.values()).sort((a, b) => a.timestamp - b.timestamp);
+  }
+
+  static async fetchCsvText(url, cacheMode, errorLabel) {
+    const response = await fetch(url, { cache: cacheMode });
+    if (!response.ok) {
+      throw new Error(`${errorLabel}: ${response.status}`);
+    }
+
+    return response.text();
+  }
+
   static async loadUsdCSVData() {
-    if (this.usdCsvData) return this.usdCsvData;
-    if (this.csvLoadingPromise) return this.csvLoadingPromise;
+    const archiveMode = readArchiveMode();
+
+    if (this.usdCsvData && this.usdCsvMode === archiveMode) return this.usdCsvData;
+    if (this.csvLoadingPromise && this.usdCsvMode === archiveMode) return this.csvLoadingPromise;
+
+    this.usdCsvMode = archiveMode;
 
     this.csvLoadingPromise = (async () => {
-      const response = await fetch(btcUsdCsvUrl, { cache: 'force-cache' });
-      if (!response.ok) {
-        throw new Error(`Bundled BTC CSV error: ${response.status}`);
-      }
+      if (archiveMode === LOCAL_MINUTE_ARCHIVE_MODE) {
+        try {
+          const localMinuteCsv = await this.fetchCsvText(
+            LOCAL_MINUTE_ARCHIVE_URL,
+            'no-store',
+            'Local minute BTC CSV error'
+          );
+          const parsedLocalData = this.parseMinuteCsvToDaily(localMinuteCsv);
 
-      const text = await response.text();
-      const lines = text.split('\n');
-      const dailyData = new Map();
-
-      for (let index = 1; index < lines.length; index += 1) {
-        if (!lines[index].trim()) continue;
-
-        const [rawTimestamp, rawOpen, rawHigh, rawLow, rawClose, rawVolume] = lines[index]
-          .split(',')
-          .map((value) => parseFloat(value));
-
-        if (Number.isNaN(rawTimestamp)) continue;
-
-        const dayKey = toUtcDayTimestamp(rawTimestamp * 1000);
-
-        if (!dailyData.has(dayKey)) {
-          dailyData.set(dayKey, {
-            timestamp: dayKey,
-            open: rawOpen,
-            high: rawHigh,
-            low: rawLow,
-            close: rawClose,
-            volume: rawVolume
-          });
-        } else {
-          const point = dailyData.get(dayKey);
-          point.high = Math.max(point.high, rawHigh);
-          point.low = Math.min(point.low, rawLow);
-          point.close = rawClose;
-          point.volume += rawVolume;
+          if (parsedLocalData.length > 0) {
+            return parsedLocalData;
+          }
+        } catch {
+          // Fall through to the bundled daily archive for public or incomplete local setups.
         }
       }
 
-      const parsedData = Array.from(dailyData.values()).sort((a, b) => a.timestamp - b.timestamp);
-      if (parsedData.length === 0) {
-        throw new Error('Bundled BTC CSV returned no usable rows');
+      const bundledDailyCsv = await this.fetchCsvText(
+        btcUsdDailyCsvUrl,
+        'force-cache',
+        'Bundled BTC daily CSV error'
+      );
+      const parsedDailyData = this.parseDailyCsv(bundledDailyCsv);
+
+      if (parsedDailyData.length === 0) {
+        throw new Error('Bundled BTC daily CSV returned no usable rows');
       }
 
-      return parsedData;
+      return parsedDailyData;
     })();
 
     try {
@@ -1137,7 +1262,7 @@ const PriceCard = ({
             Spot price
           </div>
           <div className="mt-4 max-w-full overflow-hidden text-[clamp(2.8rem,7vw,5.6rem)] font-black text-slate-950 dark:text-slate-50 tracking-[-0.05em] leading-[0.92] break-words">
-            {formatCurrency(price, currency)}
+            {formatWholeCurrency(price, currency)}
           </div>
           <div className={`mt-5 inline-flex items-center rounded-full px-3 py-1.5 ${isPositive ? 'bg-emerald-500/12 text-emerald-600 dark:text-emerald-300' : 'bg-rose-500/12 text-rose-600 dark:text-rose-300'} font-semibold`}>
             {isPositive ? <TrendingUp size={18} className="mr-1.5" /> : <TrendingDown size={18} className="mr-1.5" />}
@@ -1164,7 +1289,7 @@ const PriceCard = ({
   );
 };
 
-const MarketStatsStrip = ({ performanceStats, stats24h, currency, loading }) => {
+const MarketStatsStrip = ({ performanceStats, stats24h, currency, loading, meanAnnualGrowth }) => {
   const summaryCards = [
     ...performanceStats.map((entry) => ({
       id: entry.id,
@@ -1183,6 +1308,12 @@ const MarketStatsStrip = ({ performanceStats, stats24h, currency, loading }) => 
       label: '24h low',
       value: stats24h.low ? formatCurrency(stats24h.low, currency) : '-',
       tone: 'neutral'
+    },
+    {
+      id: 'MEAN_ANNUAL_GROWTH',
+      label: 'Avg YoY since start',
+      value: meanAnnualGrowth === null ? '-' : `${meanAnnualGrowth >= 0 ? '+' : ''}${meanAnnualGrowth.toFixed(2)}%`,
+      tone: meanAnnualGrowth === null ? 'neutral' : (meanAnnualGrowth >= 0 ? 'positive' : 'negative')
     }
   ];
 
@@ -1695,6 +1826,7 @@ const BitcoinTracker = () => {
   const currentData = latestSeries.length > 0 ? latestSeries[latestSeries.length - 1] : null;
   const stats24h = useMemo(() => buildRollingWindowStats(latestSeries, currentData), [latestSeries, currentData]);
   const performanceStats = useMemo(() => buildPerformanceStats(latestSeries, currentData), [latestSeries, currentData]);
+  const meanAnnualGrowth = useMemo(() => buildMeanAnnualGrowth(latestSeries, currentData), [latestSeries, currentData]);
   const blockingLoad = loading || (currencyLoading && selectedCurrency !== activeFxCurrency);
   const showBlockingFetchError = Boolean(fetchStatus.error) && !currentData && chartData.length === 0;
 
@@ -1756,6 +1888,7 @@ const BitcoinTracker = () => {
           stats24h={stats24h}
           currency={selectedCurrency}
           loading={blockingLoad}
+          meanAnnualGrowth={meanAnnualGrowth}
         />
 
         <ChartSection
