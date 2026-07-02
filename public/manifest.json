@@ -1,7 +1,7 @@
 {
     "name": "Bitcoin Price Tracker",
     "short_name": "BTC Tracker",
-    "description": "Real-time Bitcoin price tracking with desktop widget support",
+    "description": "Historical Bitcoin price tracking with hourly zoom and fiat conversion",
     "start_url": "/",
     "display": "standalone",
     "background_color": "#1f2937",
@@ -19,26 +19,8 @@
         "sizes": "512x512",
         "type": "image/png",
         "purpose": "any maskable"
-      }
-    ],
-    "shortcuts": [
-      {
-        "name": "Compact View",
-        "short_name": "Widget",
-        "description": "Open in compact widget mode",
-        "url": "/?mode=compact",
-        "icons": [{ "src": "/icon-96.png", "sizes": "96x96" }]
-      }
+        }
     ],
     "categories": ["finance", "productivity"],
-    "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
-    "edge_side_panel": {
-      "preferred_width": 320
-    },
-    "protocol_handlers": [
-      {
-        "protocol": "web+btcprice",
-        "url": "/?price=%s"
-      }
-    ]
+    "display_override": ["standalone", "minimal-ui"]
   }

@@ -1,20 +1,11 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
-import { viteStaticCopy } from 'vite-plugin-static-copy'
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
     react(),
-    viteStaticCopy({
-      targets: [
-        {
-          src: 'data/btcusd_1-min_data.csv',
-          dest: 'data'
-        }
-      ]
-    }),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: [
@@ -64,7 +55,6 @@ export default defineConfig({
       }
     })
   ],
-  // Copy data folder to the build output
   publicDir: 'public',
   build: {
     rollupOptions: {
